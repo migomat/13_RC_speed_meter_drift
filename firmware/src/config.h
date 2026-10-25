@@ -6,9 +6,9 @@
 #include <stdint.h>
 
 #define FW_VERSION_MAJOR    1
-#define FW_VERSION_MINOR    2
+#define FW_VERSION_MINOR    3
 #define FW_VERSION_PATCH    0
-#define FW_VERSION_STR      "1.2.0"
+#define FW_VERSION_STR      "1.3.0"
 
 // ---------------------------------------------------------------- hall
 // Tryb czujnika halla: 1 (tylko linia A) albo 3 (A/B/C).
@@ -47,6 +47,10 @@
 #define PIN_HALL_A          D1
 #define PIN_HALL_B          D2      // tylko HALL_LINES == 3
 #define PIN_HALL_C          D3      // tylko HALL_LINES == 3
+// Skręt (serwo – sygnał ZA żyroskopem, jeśli jest): pin halla B, wolny w trybie HALL_LINES == 1.
+// Bez halla (auto do driftu): D1 zewrzeć do GND przez ~100 kΩ – wiszący pin daje fałszywe zbocza.
+#define STEERING_ENABLED    1
+#define PIN_STEERING        D2
 
 // ---------------------------------------------------------------- gaz
 #define THROTTLE_MIN_US             800    // [us] impulsy spoza zakresu odrzucane
@@ -56,6 +60,9 @@
 #define THROTTLE_NEUTRAL_SPREAD_US  10     // [us] maks. rozrzut w oknie
 #define THROTTLE_FULL_SCALE_US      500    // [us] neutrum → pełny gaz (100 %)
 #define THROTTLE_FORWARD_IS_HIGHER  1      // 1: „do przodu” = dłuższy impuls (zależy od reverse w aparaturze)
+// Skręt: ten sam pomiar i uczenie neutrum co gaz (THROTTLE_MIN/MAX_US, TIMEOUT, LEARN, SPREAD);
+// kierunek „w lewo” nie jest ustawiany tu – rozpoznaje go drift / kalibracja (DRIFT_STEER_SIGN).
+#define STEER_FULL_SCALE_US         500    // [us] neutrum → pełny skręt (100 %)
 
 // ---------------------------------------------------------------- logger
 #define SAMPLE_RATE_HZ      500
@@ -103,7 +110,8 @@
 #define RACE_RATE_HZ        20      // [Hz] próbka = średnia z SAMPLE_RATE_HZ / RACE_RATE_HZ taktów
                                     // (20 Hz: 1 MB ≈ 43 min; z tych próbek liczone są też punkty driftu)
 #define RACE_DECIM          (SAMPLE_RATE_HZ / RACE_RATE_HZ)
-#define RACE_PRETRIGGER_MS  1000    // [ms] zapis sprzed pierwszego gazu
+#define RACE_PRETRIGGER_MS  3000    // [ms] zapis sprzed pierwszego gazu (≥ DRIFT_REST_MIN_S: bias
+                                    // w przeliczeniu nagrania, także bez halla)
 #define RACE_START_PCT      30      // [% do przodu] gaz rozpoczynający wyścig
 // [s] koniec wyścigu: koła stoją i gaz w neutrum (albo brak sygnału gazu) tak długo.
 // Dłużej niż typowe czekanie na sędziego po wywrotce – krótsza przerwa nie dzieli wyścigu.
@@ -143,13 +151,17 @@
 // (DEFAULT_DRIFT), tools/config.yaml (drift:) i ustawienia aplikacji.
 #define DRIFT_LPF_TAU_S             0.05f   // [s] filtr przyspieszeń i ω
 #define DRIFT_BIAS_TAU_S            1.0f    // [s] uśrednianie biasu w postoju
+#define DRIFT_REST_DA_G             0.05f   // [g] maks. zmiana a między próbkami w postoju
+#define DRIFT_REST_DR_DPS           3.0f    // [dps] maks. zmiana ω między próbkami w postoju
+#define DRIFT_REST_MIN_S            1.5f    // [s] spokojnie i bez gazu tak długo = postój (bez halla)
 #define DRIFT_V_TAU_S               0.15f   // [s] filtr prędkości z promienia skrętu
 #define DRIFT_VDOT_TAU_S            0.3f    // [s] filtr przyspieszenia stycznego
 #define DRIFT_STEADY_YAW_ACC_DPS2   150.0f  // [dps/s] powyżej – przyspieszenie styczne nieznane
 #define DRIFT_STEADY_S              0.25f   // [s] po wejściu w łuk – przyspieszenie styczne nieznane
 #define DRIFT_MAX_DT_S              0.2f    // [s] ograniczenie kroku
 #define DRIFT_MIN_YAW_DPS           30.0f   // [dps] poniżej – jazda prosto
-#define DRIFT_MIN_ACC_G             0.3f    // [g] poniżej – kąt nieokreślony
+#define DRIFT_MIN_ACC_G             0.3f    // [g] poniżej – kąt nieokreślony (skręt nieznany)
+#define DRIFT_MIN_ACC_CS_G          0.15f   // [g] jw., gdy kontra wymagana (skręt znany)
 #define DRIFT_MIN_V_MPS             1.5f    // [m/s]
 #define DRIFT_V_MAX_MPS             30.0f   // [m/s]
 #define DRIFT_MIN_ANGLE_DEG         15.0f   // [deg] kąt, od którego liczy się drift
@@ -161,6 +173,12 @@
 #define DRIFT_PTS_PER_M_DEG         1.0f    // punkty za metr × stopień kąta
 #define DRIFT_MAX_MULT              10      // maks. mnożnik
 #define DRIFT_SPIN_LOSES_CHAIN      1       // 1 = obrót kasuje łańcuch, 0 = zalicza
+#define DRIFT_STEER_SIGN            0       // skręt: 1 normalny, -1 odwrócony, 0 = nauka (MOUNT ustawia)
+#define DRIFT_STEER_LEARN_S         3.0f    // [s] zgodnej przewagi do ustalenia znaku skrętu
+#define DRIFT_LEARN_DRIFT_DEG       30.0f   // [deg] drift tak głęboki, że skręt = kontra
+#define DRIFT_CS_MIN_PCT            8.0f    // [%] skręt od neutrum uznany za kontrę
+#define DRIFT_CS_REQUIRED           1       // 1 = przy znanym skręcie drift wymaga kontry
+#define DRIFT_ANGLE_NO_CS_DEG       35.0f   // [deg] od tego kąta drift także bez kontry
 
 // ---------------------------------------------------------------- BLE
 #define BLE_NAME            "X4F-LOG"
@@ -172,9 +190,10 @@
 
 // ---------------------------------------------------------------- format
 #define RUN_FORMAT_VERSION  1
-#define RACE_FORMAT_VERSION 1
-#define PROTOCOL_VERSION    3       // 2: komendy wyścigów RLIST/RGET/RDEL/RERASE/RSTOP
+#define RACE_FORMAT_VERSION 2       // 2: skręt w próbce (22 B) i neutrum skrętu w nagłówku
+#define PROTOCOL_VERSION    4       // 2: komendy wyścigów RLIST/RGET/RDEL/RERASE/RSTOP
                                     // 3: punkty driftu w LIVE, DRIFT RESET, MOUNT
+                                    // 4: skręt (LIVE "st", kontra i znak skrętu w "d", MOUNT … <znak>)
 
 // ---------------------------------------------------------------- debug
 // Komendy SIM_* (syntetyczne zbocza/gaz) dostępne tylko przez USB.

@@ -25,22 +25,34 @@ extern "C" {
 typedef struct {
   float yaw_offset_deg;
   float lpf_tau_s, bias_tau_s, v_tau_s, vdot_tau_s;
+  float rest_da_g, rest_dr_dps, rest_min_s;
   float steady_yaw_acc_dps2, steady_s, max_dt_s;
-  float min_yaw_dps, min_acc_g, min_v_mps, v_max_mps;
+  float min_yaw_dps, min_acc_g, min_acc_cs_g, min_v_mps, v_max_mps;
   float min_angle_deg, spin_angle_deg, spin_s;
   float chain_gap_s, min_seg_s;
   float pts_per_m, pts_per_m_deg;
   int   max_mult;
   int   spin_loses_chain;
+  int   steer_sign;         /* 1 normalny, -1 odwrócony, 0 = nauka */
+  float steer_learn_s, learn_drift_deg, cs_min_pct;
+  int   cs_required;
+  float angle_no_cs_deg;
 } DriftParams;
 
 typedef struct {
+  int   have_prev;
+  float p_af, p_al, p_r, quiet_t;
   int   have_bias;
   float b_af, b_al, b_r;
   int   first;
   float f_af, f_al, f_r;
   int   corner;
   float corner_t, r_prev, v, vdot, angle, spin_t;
+  float steer_ev;
+  int   steer_learned;
+  int   steer_ok;         /* steer ważny (znany znak i sygnał) */
+  float steer;            /* skręt [%], + = w lewo */
+  int   cs;               /* kontra */
   int   in_drift;
   float seg_t;
   int   seg_dir, seg_ok;
@@ -57,9 +69,12 @@ void drift_default_params(DriftParams* p);
 void drift_init(DriftState* s);
 /* Zerowanie wyniku (DRIFT RESET) – filtry i bias zostają */
 void drift_reset_score(DriftState* s);
-/* dt [s], a_fwd / a_left [g] i r_up [dps] w osiach auta, rest = postój (brak zboczy, gaz w neutrum) */
+/* Znak skrętu w użyciu: ustawiony albo nauczony (0 = nieznany) */
+int  drift_steer_sign(const DriftState* s, const DriftParams* p);
+/* dt [s], a_fwd / a_left [g] i r_up [dps] w osiach auta, rest_hint = brak zboczy i gaz
+ * w neutrum, steer_valid / steer_raw = skręt [% od neutrum, znak surowy] */
 void drift_step(DriftState* s, const DriftParams* p, float dt, float a_fwd, float a_left,
-                float r_up, int rest);
+                float r_up, int rest_hint, int steer_valid, float steer_raw);
 
 #ifdef __cplusplus
 }

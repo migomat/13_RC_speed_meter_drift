@@ -10,7 +10,7 @@ import { syncedCharts, scatterChart, trackMap, PALETTE } from './charts.js';
 import { GitHubStore, syncAll } from './sync.js';
 import { driftScore, mountCalibrate, DRIFT_SUMMARY_LABELS } from './drift.js';
 
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 const $ = (id) => document.getElementById(id);
 const fmt = (v, d = 2) => (v == null || Number.isNaN(v) ? '–' : v.toFixed(d).replace('.', ','));
 
@@ -418,7 +418,8 @@ function onLive(m) {
 async function sendMount() {
   const d = state.device;
   if (!d || !state.info || (state.info.proto || 1) < 3) return;
-  try { await d.mount(state.settings.imu_axes, state.settings.estimator.yaw_offset_deg); } catch (e) { toast(`Montaż: ${e.message}`); }
+  const st = (state.info.proto || 1) >= 4 ? (state.settings.drift.steer_sign || 0) : undefined;
+  try { await d.mount(state.settings.imu_axes, state.settings.estimator.yaw_offset_deg, st); } catch (e) { toast(`Montaż: ${e.message}`); }
 }
 
 const fmtPts = (v) => Math.round(v || 0).toLocaleString('pl-PL');
@@ -455,6 +456,11 @@ function renderDrift(m) {
   const a = Math.max(0, Math.min(90, m.d_ang || 0));
   $('drAngle').textContent = `${Math.round(m.d_ang || 0)}°`;
   $('drAngleBar').style.width = `${a / 90 * 100}%`;
+  $('drCs').classList.toggle('on', !!m.d_cs);
+  show($('drCs'), m.d_cs !== undefined);
+  if (m.d_steer_sign === undefined) $('drSteer').textContent = '';
+  else if (!m.d_steer_sign) $('drSteer').textContent = 'skręt: kierunek jeszcze nieznany (jedź chwilę z przyczepnością)';
+  else $('drSteer').textContent = `skręt ${m.st > 0 ? '←' : m.st < 0 ? '→' : '·'} ${Math.abs(Math.round(m.st || 0))} % · ${m.d_steer_sign > 0 ? 'normalny' : 'odwrócony'}`;
 }
 
 function vibrate(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) { /* */ } }
@@ -755,6 +761,9 @@ async function openRace(id) {
       { label: 'a_lat', values: s.a_lat, color: PALETTE[2] }] },
     { label: 'skręt', unit: '°/s', height: 130, series: [{ label: 'prędkość skrętu', values: s.yaw_rate, color: PALETTE[3] }] },
     { label: 'kąt driftu', unit: '°', height: 130, series: [{ label: 'kąt', values: dr.series.angle, color: PALETTE[6 % PALETTE.length] }] },
+    { label: 'skręt', unit: '%', height: 110, series: [
+      { label: 'skręt (+ lewo)', values: dr.series.steer, color: PALETTE[7] },
+      { label: 'kontra', values: Float64Array.from(dr.series.cs, (x) => x * 20), color: PALETTE[2] }] },
     { label: 'punkty', unit: 'pkt', height: 130, series: [
       { label: 'łańcuch', values: dr.series.pts, color: PALETTE[2] },
       { label: 'suma', values: dr.series.total, color: PALETTE[0], width: 2 }] },
@@ -770,11 +779,13 @@ async function openRace(id) {
 }
 
 function renderRaceDrift(dr) {
+  const ss = dr.summary.steer_sign;
   $('raceDrift').innerHTML = Object.entries(DRIFT_SUMMARY_LABELS).map(([k, [label, unit]]) => {
     const v = dr.summary[k];
     const val = k === 'drift_time_s' || k === 'angle_max_deg' ? fmt(v, 1) : fmtPts(v);
     return `<div class="metric"><div class="l">${label}</div><div class="v">${val} <span class="small muted">${unit}</span></div></div>`;
-  }).join('');
+  }).join('') + `<div class="metric"><div class="l">Skręt</div><div class="v small">${
+    ss > 0 ? 'normalny' : ss < 0 ? 'odwrócony' : 'brak / nieustalony'}</div></div>`;
 }
 
 function calibrateFromRace() {
@@ -786,10 +797,14 @@ function calibrateFromRace() {
     const ax = cal.imu_axes;
     const cur = state.settings.imu_axes;
     const same = ax.forward === cur.forward && ax.left === cur.left && ax.up === cur.up &&
-      Math.abs(cal.yaw_offset_deg - state.settings.estimator.yaw_offset_deg) < 2;
+      Math.abs(cal.yaw_offset_deg - state.settings.estimator.yaw_offset_deg) < 2 &&
+      (!cal.steer_sign || cal.steer_sign === state.settings.drift.steer_sign);
+    const stTxt = cal.steer_sign > 0 ? 'normalny' : cal.steer_sign < 0 ? 'odwrócony' : 'nieustalony (brak skrętu w nagraniu)';
     $('raceCalibMsg').innerHTML = `Do przodu <b>${ax.forward}</b>, w lewo <b>${ax.left}</b>, w górę <b>${ax.up}</b>, ` +
-      `kąt w poziomie <b>${fmt(cal.yaw_offset_deg, 1)}°</b> (z ${cal.samples} próbek w zakrętach, rozrzut ${fmt(cal.spread_deg, 0)}°).` +
-      (cal.spread_deg > 35 ? ' <span class="warn">Duży rozrzut – nagranie z poślizgami albo za wolna jazda; wynik niepewny.</span>' : '') +
+      `kąt w poziomie <b>${fmt(cal.yaw_offset_deg, 1)}°</b> (z ${cal.samples} próbek w zakrętach, rozrzut ${fmt(cal.spread_deg, 0)}°). ` +
+      `Skręt: <b>${stTxt}</b>.` +
+      (cal.spread_deg > 30 ? ' <span class="warn">Duży rozrzut – nagranie z poślizgami albo za wolna jazda; wynik niepewny.</span>' : '') +
+      (getRaceDrift(rec).summary.drift_time_s > 2 ? ' <span class="warn">W nagraniu jest drift – kalibruj na spokojnych kółkach z przyczepnością (inaczej montaż i kierunek skrętu wyjdą błędnie).</span>' : '') +
       (same ? ' Tak jak w ustawieniach.' : '');
     show($('raceCalibApply'), !same);
   } catch (e) {
@@ -805,6 +820,7 @@ async function applyCalibration() {
   const s = mergeSettings(state.settings);
   s.imu_axes = { ...cal.imu_axes };
   s.estimator.yaw_offset_deg = Math.round(cal.yaw_offset_deg * 10) / 10;
+  if (cal.steer_sign) s.drift.steer_sign = cal.steer_sign;
   state.settings = s;
   state.analysisCache.clear();
   await db.kvSet('settings', s);
@@ -980,8 +996,11 @@ function renderSettings() {
   $('setRaceLp').value = s.race_lowpass_hz;
   $('setDrift').innerHTML = DRIFT_FIELDS.map(([k, l]) => `<label>${l}<input data-drift="${k}" type="number" step="any" inputmode="decimal" value="${s.drift[k]}"></label>`).join('');
   $('setDriftSpin').checked = !!s.drift.spin_loses_chain;
+  $('setSteerSign').value = String(s.drift.steer_sign || 0);
+  $('setCsReq').checked = !!s.drift.cs_required;
   $('setMount').textContent = `Montaż płytki: do przodu ${s.imu_axes.forward}, w lewo ${s.imu_axes.left}, w górę ${s.imu_axes.up}, ` +
-    `kąt ${fmt(s.estimator.yaw_offset_deg, 1)}° – kalibracja w szczegółach wyścigu (jazda bez driftu).`;
+    `kąt ${fmt(s.estimator.yaw_offset_deg, 1)}° – kalibracja w szczegółach wyścigu (jazda bez driftu). ` +
+    'Znak skrętu i montaż trafiają do Xiao po połączeniu; „wymaga kontry” Xiao bierze z firmware.';
   $('setEst').innerHTML = EST_FIELDS.map(([k, l]) => `<label>${l}<input data-est="${k}" type="number" step="any" inputmode="decimal" value="${s.estimator[k]}"></label>`).join('');
   $('setTheme').value = localStorage.getItem('x4f_theme') || 'auto';
   $('appVersion').textContent = `X4F Drift Logger ${APP_VERSION} · analiza zgodna z tools/rc_launch/analyze.py i drift.py`;
@@ -999,6 +1018,8 @@ async function saveSettings() {
   document.querySelectorAll('[data-est]').forEach((el) => { s.estimator[el.dataset.est] = parseFloat(el.value); });
   document.querySelectorAll('[data-drift]').forEach((el) => { s.drift[el.dataset.drift] = parseFloat(el.value); });
   s.drift.spin_loses_chain = $('setDriftSpin').checked ? 1 : 0;
+  s.drift.steer_sign = parseInt($('setSteerSign').value, 10) || 0;
+  s.drift.cs_required = $('setCsReq').checked ? 1 : 0;
   if (DRIFT_FIELDS.some(([k]) => !(s.drift[k] >= 0))) { $('setMsg').textContent = 'Niepoprawne wartości punktów za drift.'; return; }
   const axesUsed = new Set(Object.values(s.imu_axes).map((a) => a[1]));
   if (axesUsed.size !== 3) { $('setMsg').textContent = 'Każda oś auta musi mieć inną oś płytki.'; return; }

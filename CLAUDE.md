@@ -665,7 +665,7 @@ połowy flash. Szczegóły formatu: `docs/FORMAT.md`, komendy: `docs/PROTOCOL.md
 - Okrążenia i mapa toru: `race_laps` / `raceLaps` – granice co 360° kursu z żyroskopu, pozycja
   z drogi kół, tor = średnia dopasowanych okrążeń (opis w README). Wektory zawierają okrążenia i tor.
 
-## Punkty za drift (fw 1.2, aplikacja 1.4 – projekt 13_RC_speed_meter_drift)
+## Punkty za drift (fw 1.3, aplikacja 1.5 – projekt 13_RC_speed_meter_drift)
 
 Zakładka *Drift*: punkty łańcucha (góra), mnożnik (środek), suma (dół). Liczy Xiao (`drift.c`)
 z próbek wyścigu 20 Hz i wysyła w `LIVE` (tablica `d`); aplikacja tylko wyświetla. Opis: README.
@@ -677,6 +677,9 @@ z próbek wyścigu 20 Hz i wysyła w `LIVE` (tablica `d`); aplikacja tylko wyśw
   i test C `tools/drift_host`). Stałe: `DRIFT_*` = `config.yaml: drift` = ustawienia aplikacji.
 - Montaż płytki (osie + kąt w poziomie) decyduje o kącie driftu: kalibracja z nagrania jazdy bez
   driftu (`mount_calibrate` / `mountCalibrate`), wysyłana do Xiao komendą `MOUNT` (protokół 3).
+- Skręt (fw 1.3, D2, tylko `HALL_LINES == 1`): kontra potwierdza drift; kierunek skrętu automatycznie
+  (nauka w drift.c, kalibracja) albo ręcznie – nigdy nie zgadywać na stałe. Format wyścigu 2 (22 B).
+- Auto do driftu może nie mieć halla: nic w drifcie nie może wymagać zboczy (postój z IMU + gaz).
 
 ## Synchronizacja (aplikacja 1.3)
 

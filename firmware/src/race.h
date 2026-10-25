@@ -33,7 +33,8 @@ struct RaceRec {
 };
 
 void        race_begin(void);       // po flash_begin(): skan, domknięcie przerwanego
-void        race_push(const Sample& s, float throttle_pct, bool throttle_valid, bool neutral_learned);
+void        race_push(const Sample& s, float throttle_pct, bool throttle_valid, bool neutral_learned,
+                      uint16_t steer_us);
 void        race_poll(void);        // zapis bufora do flash (nieblokujący) – pętla i wait hook
 RaceState   race_state(void);
 const char* race_state_name(void);

@@ -253,12 +253,14 @@ class Device:
         """Zerowanie punktów driftu (protokół ≥ 3)."""
         return self.command("DRIFT RESET")
 
-    def mount(self, imu_axes: dict | None = None, yaw_offset_deg: float = 0.0):
-        """Montaż płytki (protokół ≥ 3): bez argumentów – odczyt; wynik kalibracji → Xiao (do wyłączenia)."""
+    def mount(self, imu_axes: dict | None = None, yaw_offset_deg: float = 0.0, steer_sign: int | None = None):
+        """Montaż płytki (protokół ≥ 3; znak skrętu 1/−1/0 – protokół ≥ 4): bez argumentów – odczyt;
+        wynik kalibracji → Xiao (do wyłączenia zasilania)."""
         if imu_axes is None:
             return self.command("MOUNT")
+        st = "" if steer_sign is None else f" {int(steer_sign)}"
         return self.command(f"MOUNT {imu_axes['forward']} {imu_axes['left']} {imu_axes['up']} "
-                            f"{yaw_offset_deg:.1f}")
+                            f"{yaw_offset_deg:.1f}{st}")
 
     def list_races(self):
         """Wyścigi (protokół ≥ 2): lista i stan obszaru."""

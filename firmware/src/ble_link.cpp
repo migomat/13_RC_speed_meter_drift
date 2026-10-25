@@ -11,6 +11,7 @@
 #include "race.h"
 #include "run_format.h"
 #include "sim.h"
+#include "steering.h"
 #include "throttle.h"
 #include "timebase.h"
 
@@ -137,14 +138,15 @@ static void set_phy(bool fast) {
 static const char AXIS_CH[] = "xyz";
 
 static void mount_str(char* b, size_t n) {
-  snprintf(b, n, "\"mount\":[\"%c%c\",\"%c%c\",\"%c%c\",%.1f]",
+  snprintf(b, n, "\"mount\":[\"%c%c\",\"%c%c\",\"%c%c\",%.1f,%d]",
            g_mount.sign[0] > 0 ? '+' : '-', AXIS_CH[g_mount.idx[0]],
            g_mount.sign[1] > 0 ? '+' : '-', AXIS_CH[g_mount.idx[1]],
-           g_mount.sign[2] > 0 ? '+' : '-', AXIS_CH[g_mount.idx[2]], g_mount.yaw_deg);
+           g_mount.sign[2] > 0 ? '+' : '-', AXIS_CH[g_mount.idx[2]], g_mount.yaw_deg,
+           g_mount.steer_sign);
 }
 
-// MOUNT <forward> <left> <up> <yaw_deg>, np. MOUNT +y -x +z -18.5
-static bool parse_mount(char** argv, Mount* m) {
+// MOUNT <forward> <left> <up> <yaw_deg> [<znak skrętu 1/-1/0>], np. MOUNT +y -x +z -18.5 -1
+static bool parse_mount(char** argv, int argc, Mount* m) {
   for (int k = 0; k < 3; k++) {
     const char* a = argv[k];
     if ((a[0] != '+' && a[0] != '-') || !a[1] || a[2]) return false;
@@ -158,6 +160,8 @@ static bool parse_mount(char** argv, Mount* m) {
   int cyc = (m->idx[1] - m->idx[0] + 3) % 3 == 1 ? 1 : -1;
   if (cyc * m->sign[0] * m->sign[1] != m->sign[2]) return false;
   m->yaw_deg = (float)atof(argv[3]);
+  m->steer_sign = argc > 4 ? atoi(argv[4]) : g_mount.steer_sign;
+  if (m->steer_sign < -1 || m->steer_sign > 1) return false;
   return m->yaw_deg >= -180.0f && m->yaw_deg <= 180.0f;
 }
 
@@ -263,12 +267,12 @@ static void cmd_info(Link& l) {
            "\"edges_per_rev\":%d,\"slot_size\":%lu,\"slots\":%d,\"sample_rate\":%d,"
            "\"get_block_max\":%d,\"max_samples\":%d,\"max_edges\":%lu,\"jedec\":\"%06lX\","
            "\"name\":\"%s\",\"race_rate\":%d,\"race_area\":%lu,\"race_sample_size\":%u,"
-           "\"drift\":1,\"gyro_range\":%d,",
+           "\"drift\":1,\"steer\":%d,\"gyro_range\":%d,",
            FW_VERSION_STR, RUN_FORMAT_VERSION, PROTOCOL_VERSION, HALL_LINES, MOTOR_POLE_PAIRS,
            EDGES_PER_REV, (unsigned long)FLASH_SLOT_SIZE, FLASH_NUM_SLOTS, SAMPLE_RATE_HZ,
            GET_BLOCK_MAX, MAX_SAMPLES, (unsigned long)EDGE_LOG_LEN,
            (unsigned long)flash_jedec_id(), BLE_NAME, RACE_RATE_HZ, (unsigned long)RACE_AREA_SIZE,
-           (unsigned)sizeof(RaceSample), IMU_GYRO_RANGE_DPS);
+           (unsigned)sizeof(RaceSample), STEERING_ENABLED, IMU_GYRO_RANGE_DPS);
   size_t n = strlen(s_out);
   mount_str(s_out + n, sizeof(s_out) - n - 2);
   strcat(s_out, "}");
@@ -288,7 +292,9 @@ static void cmd_status(Link& l) {
            "\"ble_last_len\":%lu,\"erased_slots\":%d,\"erasing\":%s,\"ble_dropped\":%lu,"
            "\"hall_pins\":%u,\"armed\":%s,\"boot_gpregret\":%lu,\"boot_hf\":%lu,"
            "\"race_state\":\"%s\",\"races\":%d,\"races_unread\":%d,\"race_used\":%lu,"
-           "\"race_size\":%lu,\"race_rec_s\":%lu,\"race_overflows\":%lu,\"race_scan_ms\":%lu}",
+           "\"race_size\":%lu,\"race_rec_s\":%lu,\"race_overflows\":%lu,\"race_scan_ms\":%lu,"
+           "\"steer_us\":%u,\"steer_neutral_us\":%u,\"steer_learned\":%s,\"steer_pulses\":%lu,"
+           "\"steer_rejects\":%lu,\"steer_sign\":%d}",
            logger_state_name(), throttle_neutral_us(), throttle_neutral_learned() ? "true" : "false",
            throttle_signal_ok(now) ? "true" : "false", throttle_tick_width(now),
            flash_count_runs() + (logger_ram_run_available() ? 1 : 0), flash_count_free(),
@@ -309,7 +315,9 @@ static void cmd_status(Link& l) {
            (unsigned long)g_boot_gpregret, (unsigned long)g_boot_hf, race_state_name(), race_count(),
            race_count_unread(), (unsigned long)race_used_bytes(), (unsigned long)race_size_bytes(),
            (unsigned long)race_current_s(), (unsigned long)race_overflows(),
-           (unsigned long)race_scan_ms());
+           (unsigned long)race_scan_ms(), steering_tick_width(now), steering_neutral_us(),
+           steering_neutral_learned() ? "true" : "false", (unsigned long)steering_pulse_count(),
+           (unsigned long)steering_reject_count(), g_live.d_steer_sign);
   send_text(l, s_out);
 }
 
@@ -430,19 +438,20 @@ static void cmd_rerase(Link& l, bool force) {
 }
 
 // Drift jako tablica "d" (kolejność: docs/PROTOCOL.md) – cała linia mieści się w jednej
-// notyfikacji BLE (≤ 243 B), więc przy słabym zasięgu nie rozrywa się na kawałki.
+// notyfikacji BLE (≤ 243 B; najgorszy przypadek ok. 234 B), więc przy słabym zasięgu nie rozrywa
+// się na kawałki. Dodając pole – policzyć długość z maksymalnymi wartościami.
 static void send_live(Link& l) {
   snprintf(s_out, sizeof(s_out),
-           "{\"live\":1,\"v\":%.3f,\"v_max\":%.3f,\"v_front\":%.3f,\"slip\":%d,\"rpm\":%.0f,"
-           "\"thr\":%u,\"thr_pct\":%.1f,\"ax\":%.3f,\"zupt\":%d,\"state\":\"%s\",\"race\":\"%s\","
-           "\"race_s\":%lu,\"d\":[%.0f,%d,%.0f,%.0f,%.0f,%.0f,%d,%d,%lu,%lu,%lu]}",
+           "{\"live\":1,\"v\":%.2f,\"v_max\":%.2f,\"v_front\":%.2f,\"slip\":%d,\"rpm\":%.0f,"
+           "\"thr\":%u,\"thr_pct\":%.0f,\"ax\":%.3f,\"state\":\"%s\",\"race\":\"%s\","
+           "\"race_s\":%lu,\"st\":%.0f,\"d\":[%.0f,%d,%.0f,%.0f,%.0f,%.0f,%d,%d,%lu,%lu,%lu,%d,%d]}",
            g_live.v, g_live.v_max, g_live.v_front, g_live.spinning ? 1 : 0, g_live.rpm,
-           g_live.throttle_us, g_live.throttle_pct, g_live.ax_g, g_live.zupt ? 1 : 0,
+           g_live.throttle_us, g_live.throttle_pct, g_live.ax_g,
            logger_state_name(), race_state_name(), (unsigned long)race_current_s(),
-           g_live.d_pts, g_live.d_mult, g_live.d_total, g_live.d_last, g_live.d_best,
+           g_live.steer_valid ? g_live.steer_pct : 0.0f, g_live.d_pts, g_live.d_mult, g_live.d_total, g_live.d_last, g_live.d_best,
            g_live.d_angle, g_live.d_on ? 1 : 0, g_live.d_chain ? 1 : 0,
            (unsigned long)g_live.d_banks, (unsigned long)g_live.d_lost,
-           (unsigned long)g_live.d_trans);
+           (unsigned long)g_live.d_trans, g_live.d_cs ? 1 : 0, g_live.d_steer_sign);
   if (!l.is_ble) return send_text(l, s_out);
   size_t n = strlen(s_out);
   if (n + 1 >= sizeof(s_out)) return;
@@ -491,7 +500,7 @@ static void handle_line(Link& l, char* line) {
   if (!strcmp(c, "MOUNT")) {
     if (argc >= 5) {
       Mount m;
-      if (!parse_mount(argv + 1, &m)) return send_err(l, "BAD_MOUNT");
+      if (!parse_mount(argv + 1, argc - 1, &m)) return send_err(l, "BAD_MOUNT");
       if (memcmp(&m, &g_mount, sizeof(m)) != 0) s_mount_changed = true;
       g_mount = m;
     }

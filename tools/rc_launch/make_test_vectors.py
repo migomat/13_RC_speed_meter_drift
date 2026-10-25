@@ -20,7 +20,7 @@ import numpy as np
 
 from .analyze import DEFAULT_CONFIG, analyze, analyze_race
 from .drift import drift_score
-from .parse import (RACE_SAMPLE_DTYPE, RSF_GAP, SAMPLE_DTYPE, SF_DIR_FORWARD, SF_DIR_VALID,
+from .parse import (RACE_SAMPLE_DTYPE, RACE_SAMPLE_DTYPE_V1, RSF_GAP, SAMPLE_DTYPE, SF_DIR_FORWARD, SF_DIR_VALID,
                     SF_HALL_VALID, SF_THROTTLE_VALID, SF_TRIGGER, RF_NEUTRAL_LEARNED, RF_SIMULATED,
                     build_race, build_run, parse_race, parse_run)
 
@@ -325,7 +325,7 @@ def make_race_vector(scn: dict, seed: int):
                      int(round(rng.normal(0, 0.05) / GYRO_SCALE)), int(round(gz)),
                      SF_THROTTLE_VALID | (SF_HALL_VALID if period else 0), tick // fs))
         i += 1
-    smp = np.array(rows, dtype=RACE_SAMPLE_DTYPE)
+    smp = np.array(rows, dtype=RACE_SAMPLE_DTYPE_V1)   # wyścigi z fw 1.1 (format 1)
     if scn["gap_at"]:
         smp["flags"][scn["gap_at"]] |= RSF_GAP
         smp["n_ticks"][scn["gap_at"]] = 30
@@ -344,31 +344,41 @@ def make_race_vector(scn: dict, seed: int):
     return data, truth
 
 
-# ------------------------------------------------------------------ drift (20 Hz)
-# Segmenty: (czas [s], V [m/s], β [deg], ω toru [dps]) – wartości docelowe na końcu segmentu,
-# przejście gładkie (smoothstep). β = kąt prędkości względem osi auta (lewy drift: β < 0,
-# kąt driftu θ = −β; prawy: θ = β). ω auta = ω toru − dβ/dt.
+# ------------------------------------------------------------------ drift (20 Hz, format 2)
+# Segmenty: (czas [s], V [m/s], β [deg], ω toru [dps], skręt [% od neutrum, + = w lewo],
+# kąt driftu w ustalonym drifcie albo None) – wartości docelowe na końcu segmentu, przejście
+# gładkie (smoothstep). β = kąt prędkości względem osi auta (lewy drift: β < 0, kąt driftu
+# θ = −β; prawy: θ = β). ω auta = ω toru − dβ/dt. Skręt: w zakręcie z przyczepnością w stronę
+# zakrętu, w drifcie kontra (przeciwnie). steer_polarity = −1: serwo odwrócone (surowy znak).
+_EIGHTS = [
+    (3.0, 0.0, 0.0, 0.0, 0.0, None),       # postój (bias, neutrum)
+    (1.5, 4.0, 0.0, 0.0, 0.0, None),       # rozpędzanie prosto
+    (0.5, 4.0, 0.0, 60.0, 20.0, None),     # łuk z przyczepnością (nauka znaku skrętu)
+    (4.0, 4.0, 0.0, 60.0, 20.0, None),
+    (0.5, 4.0, 0.0, 0.0, 0.0, None),       # prosto
+    (1.5, 4.0, 0.0, 0.0, 0.0, None),       # łańcuch nie zaczęty
+    (0.5, 4.0, -30.0, 115.0, -18.0, None), # wejście w lewy drift (kontra w prawo)
+    (2.5, 4.0, -30.0, 115.0, -18.0, 30.0),
+    (0.7, 4.0, 30.0, -115.0, 18.0, None),  # przekładka → prawy
+    (2.5, 4.0, 30.0, -115.0, 18.0, 30.0),
+    (0.7, 4.0, -35.0, 115.0, -21.0, None), # przekładka → lewy
+    (2.0, 4.0, -35.0, 115.0, -21.0, 35.0),
+    (0.5, 4.0, 0.0, 0.0, 0.0, None),       # wyjście
+    (2.5, 4.0, 0.0, 0.0, 0.0, None),       # prosta – łańcuch zaliczony
+    (0.5, 4.0, -25.0, 115.0, -15.0, None), # drugi łańcuch
+    (2.0, 4.0, -25.0, 115.0, -15.0, 25.0),
+    (0.7, 2.0, -150.0, 115.0, -30.0, None),  # obrót – łańcuch stracony
+    (1.0, 0.0, -150.0, 0.0, 0.0, None),
+    (2.0, 0.0, -150.0, 0.0, 0.0, None),    # postój
+]
 DRIFT_SCENARIOS = {
-    "drift_eights": dict(seq=31, segments=[
-        (1.5, 0.0, 0.0, 0.0),      # postój
-        (1.5, 4.0, 0.0, 0.0),      # rozpędzanie prosto
-        (0.5, 4.0, -30.0, 115.0),  # wejście w lewy drift
-        (2.5, 4.0, -30.0, 115.0),
-        (0.7, 4.0, 30.0, -115.0),  # przekładka → prawy
-        (2.5, 4.0, 30.0, -115.0),
-        (0.7, 4.0, -35.0, 115.0),  # przekładka → lewy
-        (2.0, 4.0, -35.0, 115.0),
-        (0.5, 4.0, 0.0, 0.0),      # wyjście
-        (2.5, 4.0, 0.0, 0.0),      # prosta – łańcuch zaliczony
-        (0.5, 4.0, -25.0, 115.0),  # drugi łańcuch
-        (2.0, 4.0, -25.0, 115.0),
-        (0.7, 2.0, -150.0, 115.0), # obrót – łańcuch stracony
-        (1.0, 0.0, -150.0, 0.0),
-        (2.0, 0.0, -150.0, 0.0),   # postój
-    ], truth=dict(angles=[(4.2, 5.8, 30.0), (7.4, 9.0, 30.0), (10.6, 11.8, 35.0), (16.0, 17.3, 25.0)],
-                  transitions=2, chains=1, spins=1)),
+    "drift_eights": dict(seq=31, segments=_EIGHTS, steer_polarity=1,
+                         truth=dict(transitions=2, chains=1, spins=1, steer_sign=1)),
+    "drift_eights_rev": dict(seq=32, segments=_EIGHTS, steer_polarity=-1,
+                             truth=dict(transitions=2, chains=1, spins=1, steer_sign=-1)),
 }
 DRIFT_GYRO_SCALE = 35.0e-3   # ±1000 dps
+STEER_NEUTRAL_US = 1480
 
 
 def make_drift_vector(scn: dict, seed: int):
@@ -378,10 +388,10 @@ def make_drift_vector(scn: dict, seed: int):
     epr = 2
     m_per_rev = math.pi * 64.0e-3 / 5.0
     dtt = 1.0 / tick
-    # przebiegi w taktach 500 Hz
-    V, B, W = [], [], []
-    v0 = b0 = w0 = 0.0
-    for dur, v1, b1, w1 in scn["segments"]:
+    V, B, W, S = [], [], [], []
+    v0 = b0 = w0 = s0 = 0.0
+    angles, t_seg = [], 0.0
+    for dur, v1, b1, w1, s1, th in scn["segments"]:
         n = int(round(dur * tick))
         for k in range(n):
             u = (k + 1) / n
@@ -389,8 +399,12 @@ def make_drift_vector(scn: dict, seed: int):
             V.append(v0 + (v1 - v0) * sm)
             B.append(math.radians(b0 + (b1 - b0) * sm))
             W.append(math.radians(w0 + (w1 - w0) * sm))
-        v0, b0, w0 = v1, b1, w1
-    V, B, W = np.array(V), np.array(B), np.array(W)
+            S.append(s0 + (s1 - s0) * sm)
+        if th is not None:
+            angles.append((round(t_seg + 0.7, 2), round(t_seg + dur - 0.2, 2), th))
+        t_seg += dur
+        v0, b0, w0, s0 = v1, b1, w1, s1
+    V, B, W, S = np.array(V), np.array(B), np.array(W), np.array(S)
     Vd = np.gradient(V, dtt)
     Bd = np.gradient(B, dtt)
     r = W - Bd                                  # ω auta [rad/s]
@@ -412,6 +426,8 @@ def make_drift_vector(scn: dict, seed: int):
         rpm = vw * 1.3 / m_per_rev * 60.0
         period = int(round(60e6 / rpm / 4)) if rpm > 400 else 0
         thr = 1352 if vw < 0.05 else 1352 + 220
+        steer = STEER_NEUTRAL_US + int(round(scn["steer_polarity"] * float(np.mean(S[sl])) * 5.0
+                                             + rng.normal(0, 1.0)))
         nz = rng.normal(0, 0.008, 3)
         ax = (float(np.mean(a_x[sl])) / G + acc_bias[0] + nz[0]) / ACC_SCALE
         ay = (float(np.mean(a_y[sl])) / G + acc_bias[1] + nz[1]) / ACC_SCALE
@@ -420,24 +436,28 @@ def make_drift_vector(scn: dict, seed: int):
         rows.append((min(de, 0xFFFF), min(period, 0xFFFF), thr, int(round(ax)), int(round(ay)),
                      int(round(az)), int(round(rng.normal(0, 0.3) / DRIFT_GYRO_SCALE)),
                      int(round(rng.normal(0, 0.3) / DRIFT_GYRO_SCALE)), int(round(gz)),
-                     SF_THROTTLE_VALID | (SF_HALL_VALID if period else 0), decim))
+                     SF_THROTTLE_VALID | (SF_HALL_VALID if period else 0), decim, steer))
     smp = np.array(rows, dtype=RACE_SAMPLE_DTYPE)
     hdr = dict(seq=scn["seq"], unix_s=1_793_100_000, boot_count=9, uptime_ms=60_000,
                hall_lines=1, motor_pole_pairs=1, edges_per_rev=epr, throttle_fwd_higher=1,
                sample_rate_hz=fs, imu_odr_hz=833, accel_range_g=4, gyro_range_dps=1000,
                accel_scale_g=ACC_SCALE, gyro_scale_dps=DRIFT_GYRO_SCALE, throttle_neutral_us=1352,
                throttle_full_us=500, trigger_index=pre, tick_rate_hz=tick, decim=decim,
-               flags=RF_NEUTRAL_LEARNED | RF_SIMULATED, t0_us=654321, fw_version=0x010200,
-               period_unit_us=4, pretrigger_ms=1000, end_idle_s=30, start_pct=30,
-               hall_pullup_v_x10=38, hall_timeout_us=80000, hall_min_edge_us=300)
-    return build_race(hdr, smp, 3, 0), dict(scn["truth"])
+               flags=RF_NEUTRAL_LEARNED | RF_SIMULATED, t0_us=654321, fw_version=0x010300,
+               period_unit_us=4, pretrigger_ms=3000, end_idle_s=30, start_pct=30,
+               hall_pullup_v_x10=38, hall_timeout_us=80000, hall_min_edge_us=300,
+               steer_neutral_us=STEER_NEUTRAL_US, steer_full_us=500)
+    truth = dict(scn["truth"])
+    truth["angles"] = angles
+    return build_race(hdr, smp, 3, 0), truth
 
 
 def drift_expected_for(data: bytes, cfg: dict) -> dict:
     res = drift_score(parse_race(data), cfg)
     sr = res["series"]
     return dict(config=cfg, summary={k: float(v) for k, v in res["summary"].items()},
-                series={k: [float(x) for x in sr[k]] for k in ("angle", "v", "pts", "mult", "total", "drift")})
+                series={k: [None if math.isnan(x) else float(x) for x in sr[k]]
+                        for k in ("angle", "v", "pts", "mult", "total", "drift", "steer", "cs")})
 
 
 def race_expected_for(data: bytes, cfg: dict) -> dict:

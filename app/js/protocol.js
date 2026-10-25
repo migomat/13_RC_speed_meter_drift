@@ -10,7 +10,9 @@ export const BLOCK_MAGIC = 0x42463458;
 export const GET_BLOCK_MAX = 4096;
 
 // Punkty driftu w LIVE (protokół 3): "d":[pts, mult, total, last, best, ang, on, chain, banks, lost, trans]
-export const LIVE_DRIFT_KEYS = ['d_pts', 'd_mult', 'd_total', 'd_last', 'd_best', 'd_ang', 'd_on', 'd_chain', 'd_banks', 'd_lost', 'd_trans'];
+// protokół 4: + [cs (kontra), steer_sign (znak skrętu w użyciu, 0 = nieznany)]
+export const LIVE_DRIFT_KEYS = ['d_pts', 'd_mult', 'd_total', 'd_last', 'd_best', 'd_ang', 'd_on', 'd_chain', 'd_banks',
+  'd_lost', 'd_trans', 'd_cs', 'd_steer_sign'];
 export function expandLive(m) {
   if (Array.isArray(m.d)) LIVE_DRIFT_KEYS.forEach((k, i) => { m[k] = m.d[i]; });
   return m;
@@ -150,9 +152,10 @@ export class Device {
   vmaxReset() { return this.command('VMAX RESET'); }
   /** Punkty driftu i montaż (protokół ≥ 3). */
   driftReset() { return this.command('DRIFT RESET'); }
-  mount(axes, yawDeg) {
+  mount(axes, yawDeg, steerSign) {
     if (!axes) return this.command('MOUNT');
-    return this.command(`MOUNT ${axes.forward} ${axes.left} ${axes.up} ${(+yawDeg || 0).toFixed(1)}`);
+    const st = steerSign === undefined ? '' : ` ${Math.trunc(steerSign) || 0}`;   // protokół ≥ 4
+    return this.command(`MOUNT ${axes.forward} ${axes.left} ${axes.up} ${(+yawDeg || 0).toFixed(1)}${st}`);
   }
   arm() { return this.command('ARM'); }
 

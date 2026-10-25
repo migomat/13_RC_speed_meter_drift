@@ -1,8 +1,9 @@
-# Protokół X4F-LOG (wersja 3)
+# Protokół X4F-LOG (wersja 4)
 
 Wersja 2 (fw 1.1.0) dodaje komendy wyścigów `RLIST`/`RGET`/`RDEL`/`RERASE`/`RSTOP` i pola
 `race_*`. Wersja 3 (fw 1.2.0, drift) dodaje punkty za drift w `LIVE` (`d`), `DRIFT RESET`
-i `MOUNT`. Klient sprawdza `proto` z `INFO` – starszy firmware nie zna nowych komend.
+i `MOUNT`. Wersja 4 (fw 1.3.0) dodaje skręt: `st` w `LIVE`, kontrę i znak skrętu w `d`,
+znak skrętu w `MOUNT`, pola `steer_*` w `STATUS`; `LIVE` bez pola `zupt`. Klient sprawdza `proto` z `INFO` – starszy firmware nie zna nowych komend.
 
 Transport BLE: Nordic UART Service (`6e400001-…`), RX `6e400002` (zapis, telefon → Xiao),
 TX `6e400003` (notyfikacje). Nazwa rozgłoszeniowa `X4F-LOG`. MTU do 247 (payload 244).
@@ -26,17 +27,17 @@ u32 magic 0x42463458 ("X4FB") | u32 seq | u32 offset | u32 len | u32 crc32(dane)
 
 | Komenda | Odpowiedź |
 |---|---|
-| `INFO` | `{"fw","format","proto","hall_lines","pole_pairs","edges_per_rev","slot_size","slots","sample_rate","get_block_max","max_samples","max_edges","jedec","name","race_rate","race_area","race_sample_size","drift","gyro_range","mount"}` – `mount`: `["+x","+y","+z",0.0]` (osie auta forward/left/up w osiach płytki, kąt w poziomie [°]) |
-| `STATUS` | `{"state","neutral_us","neutral_learned","throttle_ok","throttle_us","runs","free_slots","overwritten_unread","time_set","ram_run","imu_ok","flash_ok","imu_overruns",…,"ble_dropped","hall_pins","armed"}` – `hall_pins`: bieżący stan pinów halla (bity A\|B<<1\|C<<2, diagnostyka okablowania), `armed`: postój zaliczony, wyzwolenie możliwe; wyścigi: `race_state`, `races`, `races_unread`, `race_used`, `race_size` [B], `race_rec_s`, `race_overflows` (próbki zgubione przez pełny bufor RAM), `race_scan_ms` (skan przy starcie) |
+| `INFO` | `{"fw","format","proto","hall_lines","pole_pairs","edges_per_rev","slot_size","slots","sample_rate","get_block_max","max_samples","max_edges","jedec","name","race_rate","race_area","race_sample_size","drift","steer","gyro_range","mount"}` – `mount`: `["+x","+y","+z",0.0]` (osie auta forward/left/up w osiach płytki, kąt w poziomie [°]) |
+| `STATUS` | `{"state","neutral_us","neutral_learned","throttle_ok","throttle_us","runs","free_slots","overwritten_unread","time_set","ram_run","imu_ok","flash_ok","imu_overruns",…,"ble_dropped","hall_pins","armed"}` – `hall_pins`: bieżący stan pinów halla (bity A\|B<<1\|C<<2, diagnostyka okablowania), `armed`: postój zaliczony, wyzwolenie możliwe; wyścigi: `race_state`, `races`, `races_unread`, `race_used`, `race_size` [B], `race_rec_s`, `race_overflows` (próbki zgubione przez pełny bufor RAM), `race_scan_ms` (skan przy starcie); skręt (v4): `steer_us` (bieżący impuls, 0 = brak), `steer_neutral_us`, `steer_learned`, `steer_pulses`, `steer_rejects` (impulsy spoza 800–2200 µs – np. serwo w trybie wąskopasmowym), `steer_sign` |
 | `TIME <unix_s>` | `OK` |
 | `LIST` | `{"runs":[{"seq","len","crc","unix","boot","uptime_ms"[,"ram":true]}…]}` od najstarszego |
 | `GET <seq> <offset> <len>` | ramka binarna; `len ≤ 4096`; przez BLE przełącza na PHY 2M (szybsze pobieranie) |
 | `DEL <seq>` | `OK DEL <seq>` albo `{"err":"NOT_FOUND","seq":…}` |
 | `ARM` | `OK` – powrót z ERROR do IDLE |
-| `LIVE 1` / `LIVE 0` | `OK`; potem 20 Hz: `{"live":1,"v","v_max","v_front","slip","rpm","thr","thr_pct","ax","zupt","state","race","race_s","d":[…]}` – `race`: stan zapisu wyścigu, `race_s`: długość bieżącego wyścigu [s]; drift (v3) w tablicy `d` (cała linia mieści się w jednej notyfikacji BLE): `[pts, mult, total, last, best, ang, on, chain, banks, lost, trans]` = punkty bieżącego łańcucha (przed mnożnikiem), mnożnik, suma, ostatni zaliczony łańcuch (×mnożnik), najlepszy, kąt driftu [°] (0 poza łukiem), drift teraz (0/1), łańcuch trwa (0/1), zaliczone łańcuchy, obroty, przekładki. Wynik liczy Xiao – zgubione linie LIVE nic nie zmieniają. `LIVE 1` przez BLE przełącza na PHY 1M (zasięg) |
+| `LIVE 1` / `LIVE 0` | `OK`; potem 20 Hz: `{"live":1,"v","v_max","v_front","slip","rpm","thr","thr_pct","ax","state","race","race_s","st","d":[…]}` – `race`: stan zapisu wyścigu, `race_s`: długość bieżącego wyścigu [s]; `st`: skręt [%] (+ = w lewo, gdy znak znany; inaczej znak surowy; 0 = brak sygnału); drift w tablicy `d`: `[pts, mult, total, last, best, ang, on, chain, banks, lost, trans, cs, steer_sign]` = punkty bieżącego łańcucha (przed mnożnikiem), mnożnik, suma, ostatni zaliczony łańcuch (×mnożnik), najlepszy, kąt driftu [°] (0 poza łukiem), drift teraz (0/1), łańcuch trwa (0/1), zaliczone łańcuchy, obroty, przekładki, kontra (0/1), znak skrętu w użyciu (1/−1, 0 = nieznany). Cała linia mieści się w jednej notyfikacji BLE (najgorszy przypadek ok. 234 B). Wynik liczy Xiao – zgubione linie LIVE nic nie zmieniają. `LIVE 1` przez BLE przełącza na PHY 1M (zasięg) |
 | `VMAX RESET` | `OK` |
 | `DRIFT RESET` | `OK` – zerowanie punktów za drift (v3) |
-| `MOUNT [<forward> <left> <up> <yaw_deg>]` | `{"mount":[…]}` (v3) – bez argumentów odczyt; np. `MOUNT +y -x +z -18.5` ustawia montaż płytki dla prędkościomierza i driftu (układ prawoskrętny, \|yaw\| ≤ 180), do wyłączenia zasilania; zmiana montażu zeruje estymator, filtry i punkty driftu; aplikacja wysyła wynik kalibracji po połączeniu. Zła wartość: `{"err":"BAD_MOUNT"}` |
+| `MOUNT [<forward> <left> <up> <yaw_deg> [<znak skrętu>]]` | `{"mount":[…, yaw, znak]}` (v3; znak skrętu v4: 1 normalny, −1 odwrócony, 0 = nauka w jeździe) – bez argumentów odczyt; np. `MOUNT +y -x +z -18.5 -1` ustawia montaż płytki dla prędkościomierza i driftu (układ prawoskrętny, \|yaw\| ≤ 180), do wyłączenia zasilania; zmiana montażu zeruje estymator, filtry i punkty driftu; aplikacja wysyła wynik kalibracji po połączeniu. Zła wartość: `{"err":"BAD_MOUNT"}` |
 | `RLIST` | `{"races":[{"seq","len","crc","unix","boot","uptime_ms","n","end","read"}…],"state","used","size"}` – od najstarszego; `read`: oznaczony jako pobrany; `state`: IDLE / RECORDING / FINISHING / FULL / ERASING / DIRTY / ERROR |
 | `RGET <seq> <offset> <len>` | ramka binarna jak `GET`; dane = plik wyścigu (`docs/FORMAT.md`) |
 | `RDEL <seq>` | `OK RDEL <seq>` – oznacza wyścig jako pobrany (miejsce zwalnia dopiero `RERASE`) |

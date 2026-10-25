@@ -1,6 +1,6 @@
 // Service worker – praca offline. Wszystkie zasoby lokalne (bez CDN).
 // Zmiana dowolnego pliku aplikacji = podbicie CACHE.
-const CACHE = 'x4f-drift-v1.4.0';
+const CACHE = 'x4f-drift-v1.5.0';
 const ASSETS = [
   './', './index.html', './manifest.webmanifest', './css/app.css',
   './vendor/uPlot.iife.min.js', './vendor/uPlot.min.css',
@@ -10,7 +10,7 @@ const ASSETS = [
   './demo/index.json', './demo/mode1_grip.bin', './demo/mode1_slip.bin', './demo/mode3_grip.bin',
   './demo/mode3_slip.bin', './demo/mode1_slip_noedges.bin', './demo/mode1_lifted.bin',
   './demo/races.json', './demo/race_oval.bin', './demo/race_recovered.bin',
-  './demo/drift.json', './demo/drift_eights.bin',
+  './demo/drift.json', './demo/drift_eights.bin', './demo/drift_eights_rev.bin',
 ];
 
 self.addEventListener('install', (e) => {

@@ -4,7 +4,7 @@
 // CapacitorBleTransport (@capacitor-community/bluetooth-le) z tym samym interfejsem.
 
 import { crc32, runCrc, parseHeader, raceCrc, parseRace } from './format.js';
-import { driftInit, driftStep, driftParams, driftResetScore, raceInputs } from './drift.js';
+import { driftInit, driftStep, driftParams, driftResetScore, raceInputs, steerSignOf } from './drift.js';
 import { DEFAULT_SETTINGS } from './analysis.js';
 
 export const NUS_SERVICE = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
@@ -133,7 +133,7 @@ export class DemoTransport {
     this.driftRace = null;  // nagranie z driftem odtwarzane w LIVE (punkty jak na Xiao)
     this.drift = driftInit();
     this.driftI = 0;
-    this.mount = ['+x', '+y', '+z', 0];
+    this.mount = ['+x', '+y', '+z', 0, 0];
   }
 
   onFrame(cb) { this.frameCb = cb; }
@@ -255,7 +255,7 @@ export class DemoTransport {
     const [cmd, ...args] = text.trim().split(/\s+/);
     switch (cmd) {
       case 'INFO':
-        return this._text(JSON.stringify({ fw: '1.2.0-demo', format: 1, proto: 3, hall_lines: 1, pole_pairs: 1,
+        return this._text(JSON.stringify({ fw: '1.3.0-demo', format: 1, proto: 4, steer: 1, hall_lines: 1, pole_pairs: 1,
           edges_per_rev: 2, slot_size: 131072, slots: 8, sample_rate: 500, get_block_max: 4096, name: this.name,
           race_rate: 20, race_area: 1048576, race_sample_size: 20, drift: 1, gyro_range: 1000, mount: this.mount }));
       case 'STATUS':
@@ -320,7 +320,8 @@ export class DemoTransport {
         driftResetScore(this.drift);
         return this._text('OK');
       case 'MOUNT':
-        if (args.length >= 4) this.mount = [args[0], args[1], args[2], +parseFloat(args[3]).toFixed(1)];
+        if (args.length >= 4) this.mount = [args[0], args[1], args[2], +parseFloat(args[3]).toFixed(1),
+          args.length >= 5 ? parseInt(args[4], 10) || 0 : this.mount[4]];
         return this._text(JSON.stringify({ mount: this.mount }));
       case 'LIVE':
         if (args[0] === '1') this._startLive(); else this._stopLive();
@@ -353,7 +354,7 @@ export class DemoTransport {
       this.vmax = Math.max(this.vmax, v);
       const msg = { live: 1, v: +v.toFixed(3), v_max: +this.vmax.toFixed(3), v_front: +vf.toFixed(3), slip,
         rpm: Math.round(vf / (Math.PI * 0.064) * 5 * 60), thr, thr_pct: (thr - 1500) / 5, ax: +ax.toFixed(3),
-        zupt: v === 0 ? 1 : 0, state: thr > 1600 && t < 5.5 ? 'RECORDING' : 'IDLE',
+        state: thr > 1600 && t < 5.5 ? 'RECORDING' : 'IDLE',
         race: t >= 2 && t < 12 ? 'RECORDING' : 'IDLE', race_s: Math.max(0, Math.round(t - 2)) };
       Object.assign(msg, this._driftTick());
       this._text(JSON.stringify(msg));
@@ -364,13 +365,17 @@ export class DemoTransport {
   _driftTick() {
     const d = this.driftRace;
     if (!d) return {};
-    const { dt, af, al, gu, rest } = d.inp;
+    const { dt, af, al, gu, rest, steer } = d.inp;
     const i = this.driftI;
     this.driftI = (i + 1) % dt.length;
-    driftStep(this.drift, driftParams(DEFAULT_SETTINGS), dt[i], af[i], al[i], gu[i], rest[i]);
+    const p = driftParams(DEFAULT_SETTINGS);
+    driftStep(this.drift, p, dt[i], af[i], al[i], gu[i], rest[i], steer[i]);
     const s = this.drift;
-    return { d: [Math.round(s.pts), s.mult, Math.round(s.total), Math.round(s.last), Math.round(s.best),
-      s.corner ? Math.round(s.angle) : 0, s.in_drift ? 1 : 0, s.chain ? 1 : 0, s.n_banks, s.n_lost, s.n_trans] };
+    const sgn = steerSignOf(s, p);
+    const st = Number.isNaN(steer[i]) ? 0 : Math.round(steer[i] * (sgn || 1));
+    return { st, d: [Math.round(s.pts), s.mult, Math.round(s.total), Math.round(s.last), Math.round(s.best),
+      s.corner ? Math.round(s.angle) : 0, s.in_drift ? 1 : 0, s.chain ? 1 : 0, s.n_banks, s.n_lost, s.n_trans,
+      s.cs ? 1 : 0, sgn] };
   }
 
   _stopLive() {

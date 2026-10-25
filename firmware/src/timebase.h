@@ -2,7 +2,8 @@
 // zawsze odejmować jako uint32_t).
 //
 // Rejestry CC:
-//   CC[0..2] – capture zboczy halla A/B/C (GPIOTE → PPI → CAPTURE)
+//   CC[0..2] – capture zboczy halla A/B/C (GPIOTE → PPI → CAPTURE);
+//              w trybie HALL_LINES == 1 CC[1] (PPI 1) = zbocza skrętu
 //   CC[3]    – capture zbocza gazu
 //   CC[4]    – compare: takt próbkowania SAMPLE_RATE_HZ
 //   CC[5]    – capture „teraz” (timebase_now)
@@ -13,6 +14,7 @@
 #define TB_CC_HALL_A    0
 #define TB_CC_HALL_B    1
 #define TB_CC_HALL_C    2
+#define TB_CC_STEER     1   // tylko HALL_LINES == 1 (wspólny z halla B)
 #define TB_CC_THROTTLE  3
 #define TB_CC_TICK      4
 #define TB_CC_NOW       5

@@ -98,6 +98,7 @@
       <div class="dr-mult" id="drMult">×1</div>
       <div class="dr-event" id="drEvent"></div>
       <div class="dr-angle"><div class="dr-bar"><span id="drAngleBar"></span></div><b id="drAngle">0°</b></div>
+      <div class="dr-steer"><span id="drCs" class="dr-cs">KONTRA</span><span id="drSteer" class="muted small"></span></div>
       <div class="dr-total"><small>suma</small><span id="drTotal">0</span></div>
       <div class="speed-small"><span>najlepszy: <b id="drBest">0</b></span><span>przekładki: <b id="drTrans">0</b></span><span>obroty: <b id="drLost">0</b></span></div>
       <button id="drReset">Zeruj punkty</button>
@@ -180,7 +181,7 @@
       <p class="muted small">Punkty przeliczone z nagrania (ustawienia z aplikacji) – tym samym algorytmem co na Xiao.</p>
       <details>
         <summary>Kalibracja montażu z tego wyścigu</summary>
-        <p class="small">Użyj nagrania <b>spokojnej jazdy bez driftu</b> (kilka okrążeń, zwykłe zakręty) zaraz po zamontowaniu Xiao w aucie. Kierunek przyspieszenia w zakrętach wyznacza, jak płytka leży w aucie – od tego zależy kąt driftu.</p>
+        <p class="small">Użyj nagrania <b>spokojnej jazdy bez driftu</b> (kilka okrążeń, zwykłe zakręty) zaraz po zamontowaniu Xiao w aucie. Kierunek przyspieszenia w zakrętach wyznacza, jak płytka leży w aucie – od tego zależy kąt driftu. Z tego samego nagrania wychodzi kierunek skrętu (normalny / odwrócony).</p>
         <button id="raceCalib">Wyznacz montaż</button>
         <p id="raceCalibMsg" class="small"></p>
         <button id="raceCalibApply" class="primary hidden">Zastosuj</button>
@@ -246,6 +247,8 @@
       <p class="muted small">Dotyczą przeliczania nagrań w aplikacji. Na żywo Xiao liczy według stałych w firmware (config.h) – domyślnie takich samych.</p>
       <div id="setDrift"></div>
       <label class="switch"><input type="checkbox" id="setDriftSpin"> obrót kasuje punkty łańcucha</label>
+      <label>Kierunek skrętu<select id="setSteerSign"><option value="0">automatycznie (nauka w jeździe)</option><option value="1">normalny</option><option value="-1">odwrócony</option></select></label>
+      <label class="switch"><input type="checkbox" id="setCsReq"> drift wymaga kontry (gdy skręt podłączony)</label>
       <div class="btnrow"><button id="setDriftSave" class="primary">Zapisz</button></div>
       <p class="muted small" id="setMount"></p>
     </div>

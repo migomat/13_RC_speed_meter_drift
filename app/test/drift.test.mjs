@@ -22,7 +22,8 @@ for (const name of drifts) {
     const res = driftScore(load(name), exp.config);
     for (const [k, v] of Object.entries(exp.summary)) assert.ok(close(res.summary[k], v), `${k}: ${res.summary[k]} != ${v}`);
     for (const [k, vals] of Object.entries(exp.series)) {
-      vals.forEach((v, i) => assert.ok(close(res.series[k][i], v), `${k}[${i}]: ${res.series[k][i]} != ${v}`));
+      vals.forEach((v, i) => assert.ok(v === null ? Number.isNaN(res.series[k][i]) : close(res.series[k][i], v),
+        `${k}[${i}]: ${res.series[k][i]} != ${v}`));
     }
   });
 }
@@ -35,7 +36,7 @@ test('jazda z przyczepnością (race_oval) – zero punktów', () => {
 test('DRIFT RESET zeruje wynik, filtry zostają', () => {
   const s = driftInit();
   const p = driftParams(DEFAULT_SETTINGS);
-  driftStep(s, p, 0.05, 0.01, 0, 0.5, true);
+  for (let i = 0; i < 40; i++) driftStep(s, p, 0.05, 0.01, 0, 0.5, true);
   s.total = 123; s.mult = 3; s.chain = true;
   driftResetScore(s);
   assert.equal(s.total, 0); assert.equal(s.mult, 1); assert.equal(s.chain, false);
@@ -67,4 +68,16 @@ test('kalibracja montażu: domyślny i obrócony o 110°', () => {
   assert.ok(Math.abs(cal2.yaw_offset_deg - 20) < 3);
   const cal3 = mountCalibrate(rotated(race, [[1, 0, 0], [0, -1, 0], [0, 0, -1]]));
   assert.deepEqual(cal3.imu_axes, { forward: '+x', left: '-y', up: '-z' });
+});
+
+test('kalibracja: znak skrętu z jazdy z przyczepnością (normalny i odwrócony)', () => {
+  for (const [name, sign] of [['drift_eights', 1], ['drift_eights_rev', -1]]) {
+    const r = load(name);
+    let n = 0, t = 0;
+    while (n < r.n && t < 10.5) { t += r.n_ticks[n] / 500; n++; }
+    const cut = { ...r, n };
+    for (const k of ['edges', 'period_rev', 'throttle_us', 'ax', 'ay', 'az', 'gx', 'gy', 'gz', 'flags', 'n_ticks', 'steer_us', 't_s']) cut[k] = r[k].subarray(0, n);
+    const cal = mountCalibrate(cut);
+    assert.equal(cal.steer_sign, sign, name);
+  }
 });

@@ -7,7 +7,8 @@ Logger startów samochodu RC na XIAO nRF52840 Sense.
 Urządzenie tylko podsłuchuje czujnik halla silnika i sygnał gazu, nagrywa IMU
 i zapisuje starty we flash. Pobieranie odbywa się przez BLE do aplikacji PWA na Androidzie.
 Drugi tryb (fw 1.1): **ciągły zapis całych wyścigów** (od fw 1.2: 20 Hz) do osobnej części flash.
-Fw 1.2 (drift): Xiao liczy **punkty za drift** z tych samych próbek 20 Hz – zakładka *Drift* w aplikacji.
+Fw 1.2–1.3 (drift): Xiao liczy **punkty za drift** z tych samych próbek 20 Hz – zakładka *Drift* w aplikacji;
+fw 1.3: skręt (kontra), działanie bez czujnika halla, format wyścigu 2.
 Specyfikacja: `CLAUDE.md`. Okablowanie: `docs/WIRING.md`. Formaty: `docs/FORMAT.md`, `docs/PROTOCOL.md`.
 
 ```
@@ -95,37 +96,59 @@ Obok startów (500 Hz, 4 s, bufor pierścieniowy) Xiao nagrywa **całe wyścigi*
   Salon 2026-10-24: 16 okrążeń, tor ok. 11,8 m, najlepsze 6,00 s; Python = JS z dokładnością 1e-14.
   Ograniczenie: buksowanie zawyża drogę (tor surowy „odpływa”), dlatego dopasowanie okrążeń.
 
-## Punkty za drift (fw 1.2, aplikacja 1.4)
+## Punkty za drift (fw 1.3, aplikacja 1.5)
 
 Zakładka **Drift**: u góry punkty bieżącego łańcucha, na środku mnożnik, na dole suma; pasek kąta,
-najlepszy łańcuch, przekładki, obroty, „Zeruj punkty” (`DRIFT RESET`). Wibracja i napis przy
-przekładce, zaliczeniu łańcucha (+punkty) i obrocie.
+wskaźnik **KONTRA** i skręt, najlepszy łańcuch, przekładki, obroty, „Zeruj punkty” (`DRIFT RESET`).
+Wibracja i napis przy przekładce, zaliczeniu łańcucha (+punkty) i obrocie.
 
 * **Liczy Xiao** (`firmware/src/drift.c`) z próbek wyścigu 20 Hz – zawsze, także przy pełnej pamięci
   wyścigów. LIVE tylko pokazuje wynik, więc przerwy w zasięgu BLE nie gubią punktów.
 * **Kąt driftu z IMU:** przy jeździe po łuku przyspieszenie poziome jest prostopadłe do prędkości,
   więc jego kierunek w osiach auta daje kąt między osią auta a kierunkiem jazdy. Prędkość
-  z promienia skrętu V = |a|/|ω| (koła napędzane w drifcie buksują – hall się nie nadaje).
+  z promienia skrętu V = |a|/|ω| – działa **bez czujnika halla** (w drifcie koła i tak buksują).
   Przyspieszenie styczne (gaz/hamowanie w łuku) odejmowane, gdy łuk ustalony.
+* **Skręt (fw 1.3, opcjonalny):** sygnał serwa na D2 (pin halla B – wolny w trybie 1 linii halla).
+  **Kontra** (koła skręcone przeciwnie do obrotu auta) potwierdza drift: przy znanym skręcie drift
+  poniżej 35° liczy się tylko z kontrą, za to próg przyspieszenia spada z 0,3 do 0,15 g (śliskie auto).
+  **Kierunek skrętu** (normalny / odwrócony serwo) – automatycznie: Xiao uczy się w jeździe (zakręt
+  z przyczepnością = skręt w stronę zakrętu, głęboki drift = kontra; 3 s zgodnych dowodów), a
+  kalibracja w aplikacji wyznacza go z jazdy bez driftu i wysyła do Xiao (`MOUNT … <znak>`).
+  Można też wybrać ręcznie w ustawieniach. Zły znak = kontra wygląda jak skręt w zakręt i drift się
+  nie liczy, dlatego automat ma pierwszeństwo nad zgadywaniem.
+  Przy żyroskopie drift (gyro w aucie) sygnał podbierać **za żyroskopem** (przewód do serwa) – przed nim
+  nie ma kontry, którą dodaje żyroskop. Po podłączeniu sprawdzić w `STATUS` `steer_us` i
+  `steer_rejects` (serwo w trybie wąskopasmowym / 760 µs wypadnie poza 800–2200 µs).
+* **Bez halla:** pin D1 zewrzeć do GND przez ~100 kΩ (wiszący pin = fałszywe zbocza). Postój
+  wykrywany z IMU: gaz w neutrum i spokojne przyspieszenia/ω przez 1,5 s (`DRIFT_REST_*`); nagrania
+  mają 3 s pre-triggera, żeby przeliczenie w aplikacji też złapało bias. **Prędkościomierz bez halla
+  nie działa** (prędkość kół = 0 ściąga wskazanie do zera) – punkty za drift nie zależą od niego.
 * **Punkty:** w drifcie `V·dt·(10 + 1·kąt°)` – długość i kąt; **przekładka** (drift w drugą stronę
   bez przerwy > 1 s) = mnożnik +1 (do ×10); przerwa > 1 s = łańcuch zaliczony: suma += punkty × mnożnik;
-  **obrót** (kąt > 80° przez 0,25 s) = łańcuch stracony. Drift liczy się od 15°, |a| ≥ 0,3 g, V ≥ 1,5 m/s.
+  **obrót** (kąt > 80° przez 0,25 s) = łańcuch stracony. Drift liczy się od 15°, V ≥ 1,5 m/s.
   Wszystkie stałe: `config.h` (`DRIFT_*`) = `config.yaml` (`drift:`) = ustawienia aplikacji.
 * **Ten sam algorytm** w `drift.c` (float32, test na PC `tools/drift_host`), `rc_launch/drift.py`
-  (referencja) i `app/js/drift.js`; wektor `test_vectors/drift_eights` (ósemki z kątem 25–35°,
-  2 przekładki, obrót) – Python = JS = C, kąt w ustalonym drifcie w granicach 4° od prawdy,
-  jazda z przyczepnością (`race_oval`) = 0 punktów. W szczegółach wyścigu karta *Drift* i wykresy
-  kąta oraz punktów (przeliczone z nagrania).
+  (referencja) i `app/js/drift.js`; wektory `test_vectors/drift_eights` (skręt normalny) i
+  `drift_eights_rev` (odwrócony): łuk z przyczepnością (nauka znaku), ósemki 25–35° z kontrą,
+  2 przekładki, obrót. Python = JS = C (kąt do 1e-4°), kąt w ustalonym drifcie w granicach 4°,
+  znak skrętu nauczony w obu wariantach, zły ręczny znak blokuje punkty (test), bez skrętu działa
+  jak fw 1.2, jazda z przyczepnością (`race_oval`) = 0 punktów. Porównania sumowanych czasów
+  z marginesem 1 ms (Σdt we float32 i float64 różni się o ułamek próbki).
 * **Montaż płytki jest kluczowy** – błąd kąta montażu = błąd kąta driftu 1:1. Po zamontowaniu Xiao
   w aucie: kilka spokojnych okrążeń **bez driftu**, pobranie, *Wyścig → Kalibracja montażu → Wyznacz
-  → Zastosuj*. Kalibracja (`mount_calibrate` / `mountCalibrate`): oś „up” z grawitacji w postoju,
-  „left” z kierunku przyspieszenia w zakrętach (średnia ważona z odrzuceniem odstających), wynik =
-  osie co 90° + kąt w poziomie. Aplikacja wysyła montaż do Xiao (`MOUNT`) po każdym połączeniu.
+  → Zastosuj* (osie, kąt w poziomie i kierunek skrętu). Aplikacja ostrzega, gdy w nagraniu jest drift
+  albo rozrzut jest duży. Montaż wysyłany do Xiao (`MOUNT`) po każdym połączeniu – Xiao pamięta go do
+  wyłączenia zasilania (po włączeniu połączyć telefon przed jazdą). Zmiana montażu zeruje filtry,
+  punkty i nauczony znak skrętu.
   Salon 2026-10-24 (X4F FWD): do przodu +y, w lewo −x, kąt −18,5° (rozrzut 24° – ciasno i wolno).
+* **Gdzie płytka:** jak najbliżej środka masy (środek podwozia między osiami), płasko i sztywno.
+  Przy obrocie auta akcelerometr oddalony o d od środka masy mierzy dodatkowo ω²·d (wzdłuż) i
+  ε·d (w poprzek): przy 115 °/s i d = 10 cm to ok. 0,04 g ≈ 5° błędu kąta, a w przekładce (ε rzędu
+  20–40 rad/s²) 0,2–0,4 g – psuje wykrywanie przekładek. Każdy 1 cm ≈ 0,5°. Pianka montażowa OK,
+  byle płytka się nie przesuwała (inaczej kalibracja nieaktualna).
 * **Ograniczenia (do sprawdzenia na prawdziwym drifcie):** metoda zakłada w przybliżeniu ustaloną
-  jazdę po łuku; gwałtowne zmiany gazu w łuku i bardzo wolna jazda dają szum, stąd progi. Próg
-  i punkty da się stroić w aplikacji na nagraniach (przeliczenie wsteczne); Xiao na żywo używa
-  stałych z `config.h`. Żyroskop ±1000 dps (przekładki i obroty przekraczały 500).
+  jazdę po łuku; progi i punkty da się stroić w aplikacji na nagraniach (przeliczenie wsteczne);
+  Xiao na żywo używa stałych z `config.h`. Żyroskop ±1000 dps.
 
 ## Zasięg BLE
 

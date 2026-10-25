@@ -36,13 +36,17 @@ estimator:
 drift:
   lpf_tau_s: 0.05           # [s] filtr przyspieszeń i ω
   bias_tau_s: 1.0           # [s] uśrednianie biasu w postoju
+  rest_da_g: 0.05           # [g] maks. zmiana a między próbkami w postoju
+  rest_dr_dps: 3.0          # [dps] maks. zmiana ω między próbkami w postoju
+  rest_min_s: 1.5           # [s] spokojnie i bez gazu tak długo = postój (działa bez halla)
   v_tau_s: 0.15             # [s] filtr prędkości z promienia skrętu
   vdot_tau_s: 0.3           # [s] filtr przyspieszenia stycznego
   steady_yaw_acc_dps2: 150  # [dps/s] powyżej – przyspieszenie styczne nieznane
   steady_s: 0.25            # [s] po wejściu w łuk – przyspieszenie styczne nieznane
   max_dt_s: 0.2             # [s] ograniczenie kroku
   min_yaw_dps: 30           # [dps] poniżej – jazda prosto
-  min_acc_g: 0.3            # [g] poniżej – kąt nieokreślony
+  min_acc_g: 0.3            # [g] poniżej – kąt nieokreślony (skręt nieznany)
+  min_acc_cs_g: 0.15        # [g] jw., gdy kontra wymagana (skręt znany)
   min_v_mps: 1.5            # [m/s]
   v_max_mps: 30             # [m/s]
   min_angle_deg: 15         # [deg] kąt, od którego liczy się drift
@@ -54,3 +58,9 @@ drift:
   pts_per_m_deg: 1          # punkty za metr × stopień kąta
   max_mult: 10              # maks. mnożnik
   spin_loses_chain: 1       # 1 = obrót kasuje łańcuch, 0 = zalicza
+  steer_sign: 0             # skręt: 1 normalny, -1 odwrócony, 0 = automatycznie
+  steer_learn_s: 3.0        # [s] zgodnej przewagi do ustalenia znaku skrętu
+  learn_drift_deg: 30       # [deg] drift tak głęboki, że skręt = kontra
+  cs_min_pct: 8             # [%] skręt od neutrum uznany za kontrę
+  cs_required: 1            # 1 = przy znanym skręcie drift wymaga kontry
+  angle_no_cs_deg: 35       # [deg] od tego kąta drift także bez kontry

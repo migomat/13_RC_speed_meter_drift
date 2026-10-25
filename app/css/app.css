@@ -163,3 +163,6 @@ nav.tabs button.active { color: var(--accent); font-weight: 600; }
 .dr-angle b { min-width: 3.2rem; text-align: right; font-variant-numeric: tabular-nums; }
 .dr-total { display: flex; flex-direction: column; align-items: center; }
 .dr-total span { font-size: clamp(2.6rem, 14vw, 5.5rem); font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.dr-steer { display: flex; align-items: center; gap: .8rem; min-height: 2rem; }
+.dr-cs { font-weight: 800; letter-spacing: .06em; padding: .2rem .7rem; border-radius: 8px; background: var(--border); color: var(--muted); }
+.dr-cs.on { background: var(--ok); color: #fff; }

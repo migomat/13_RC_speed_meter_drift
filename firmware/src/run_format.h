@@ -120,6 +120,7 @@ static_assert(sizeof(BlockHeader) == 20, "BlockHeader 20 B");
 
 // ------------------------------------------------------------ wyścig
 // Plik wyścigu = RaceHeader + n × RaceSample + [wypełnienie] + RaceTrailer.
+// Format 1 (fw 1.1–1.2): próbka 20 B; format 2 (fw 1.3): 22 B – dopisany skręt na końcu.
 // Trailer to zawsze ostatnie 16 B pliku (po zaniku zasilania między próbkami
 // a trailerem może być wypełnienie – liczy się do CRC, parser je pomija).
 #define RACE_MAGIC          0x4C463458u   // "X4FL"
@@ -138,8 +139,9 @@ struct __attribute__((packed)) RaceSample {
   int16_t  gx, gy, gz;
   uint8_t  flags;         // SF_* | RSF_GAP; bit 7 = 0
   uint8_t  n_ticks;       // czas próbki w taktach 1/SAMPLE_RATE_HZ (zwykle RACE_DECIM), 1..254
+  uint16_t steer_us;      // format 2: średnia szerokość impulsu skrętu, 0 = brak sygnału
 };
-static_assert(sizeof(RaceSample) == 20, "RaceSample musi mieć 20 B");
+static_assert(sizeof(RaceSample) == 22, "RaceSample (format 2) musi mieć 22 B");
 
 struct __attribute__((packed)) RaceHeader {
   uint32_t magic;               //  0 RACE_MAGIC
@@ -176,7 +178,9 @@ struct __attribute__((packed)) RaceHeader {
   uint8_t  hall_pullup_v_x10;   // 79
   uint32_t hall_timeout_us;     // 80
   uint16_t hall_min_edge_us;    // 84
-  uint8_t  reserved[42];        // 86..127 = 0
+  uint16_t steer_neutral_us;    // 86 format 2: neutrum skrętu, 0 = nienauczone / brak
+  uint16_t steer_full_us;       // 88 format 2: neutrum → pełny skręt [us]
+  uint8_t  reserved[38];        // 90..127 = 0
 };
 static_assert(sizeof(RaceHeader) == RACE_HEADER_SIZE, "RaceHeader musi mieć 128 B");
 

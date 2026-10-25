@@ -150,18 +150,20 @@ def build_run(header: dict, samples: np.ndarray, edges_t_us=None, edges_line=Non
 
 
 # ------------------------------------------------------------------ wyścig
-# Plik = RaceHeader (128 B) + n × RaceSample (20 B) + [wypełnienie] + RaceTrailer (16 B).
+# Plik = RaceHeader (128 B) + n × RaceSample + [wypełnienie] + RaceTrailer (16 B).
+# Wersja 1: próbka 20 B; wersja 2 (fw 1.2, drift): 22 B – dopisany skręt (steer_us).
 # Trailer zawsze na końcu pliku; CRC32 (zlib) wszystkich bajtów przed polem crc32.
 RACE_MAGIC = 0x4C463458          # "X4FL"
 RACE_TRAILER_MAGIC = 0x45463458  # "X4FE"
-SUPPORTED_RACE_FORMAT = 1
+SUPPORTED_RACE_FORMATS = {1: 20, 2: 22}   # wersja → rozmiar próbki [B]
+SUPPORTED_RACE_FORMAT = 2
 RACE_HEADER_SIZE = 128
-RACE_SAMPLE_SIZE = 20
+RACE_SAMPLE_SIZE = 22
 RACE_TRAILER_SIZE = 16
 RSF_GAP = 0x40
 RACE_END_NAMES = {0: "postój", 1: "pełna pamięć", 2: "zanik zasilania", 3: "komenda RSTOP"}
 
-_RHDR = struct.Struct("<IHHIIIIBBBBHHHHffHHIHHIIHHIHHHBBIH42s")
+_RHDR = struct.Struct("<IHHIIIIBBBBHHHHffHHIHHIIHHIHHHBBIHHH38s")
 assert _RHDR.size == RACE_HEADER_SIZE
 _RHDR_FIELDS = (
     "magic format_version header_size seq unix_s boot_count uptime_ms hall_lines "
@@ -169,32 +171,34 @@ _RHDR_FIELDS = (
     "accel_range_g gyro_range_dps accel_scale_g gyro_scale_dps throttle_neutral_us "
     "throttle_full_us trigger_index tick_rate_hz decim flags t0_us sample_size trailer_size "
     "fw_version period_unit_us pretrigger_ms end_idle_s start_pct hall_pullup_v_x10 "
-    "hall_timeout_us hall_min_edge_us reserved"
+    "hall_timeout_us hall_min_edge_us steer_neutral_us steer_full_us reserved"
 ).split()
 _RTRL = struct.Struct("<IIB3sI")
 
-RACE_SAMPLE_DTYPE = np.dtype(
-    [
-        ("edges", "<u2"),
-        ("period_rev", "<u2"),
-        ("throttle_us", "<u2"),
-        ("ax", "<i2"),
-        ("ay", "<i2"),
-        ("az", "<i2"),
-        ("gx", "<i2"),
-        ("gy", "<i2"),
-        ("gz", "<i2"),
-        ("flags", "u1"),
-        ("n_ticks", "u1"),
-    ]
-)
+_RACE_FIELDS_V1 = [
+    ("edges", "<u2"),
+    ("period_rev", "<u2"),
+    ("throttle_us", "<u2"),
+    ("ax", "<i2"),
+    ("ay", "<i2"),
+    ("az", "<i2"),
+    ("gx", "<i2"),
+    ("gy", "<i2"),
+    ("gz", "<i2"),
+    ("flags", "u1"),
+    ("n_ticks", "u1"),
+]
+RACE_SAMPLE_DTYPE_V1 = np.dtype(_RACE_FIELDS_V1)
+# v2: skręt (średnia szerokość impulsu serwa [us], 0 = brak sygnału) na końcu próbki
+RACE_SAMPLE_DTYPE = np.dtype(_RACE_FIELDS_V1 + [("steer_us", "<u2")])
+assert RACE_SAMPLE_DTYPE_V1.itemsize == 20
 assert RACE_SAMPLE_DTYPE.itemsize == RACE_SAMPLE_SIZE
 
 
 @dataclass
 class Race:
     header: dict
-    samples: np.ndarray            # RACE_SAMPLE_DTYPE
+    samples: np.ndarray            # RACE_SAMPLE_DTYPE (v1: steer_us = 0)
     n_samples: int
     end_reason: int
     crc32: int
@@ -228,11 +232,14 @@ def parse_race_header(data: bytes) -> dict:
     del h["reserved"]
     if h["magic"] != RACE_MAGIC:
         raise FormatError(f"Zły magic wyścigu 0x{h['magic']:08X}")
-    if h["format_version"] != SUPPORTED_RACE_FORMAT:
+    if h["format_version"] not in SUPPORTED_RACE_FORMATS:
         raise FormatError(f"Nieobsługiwana wersja formatu wyścigu {h['format_version']}")
-    if (h["header_size"] != RACE_HEADER_SIZE or h["sample_size"] != RACE_SAMPLE_SIZE
+    if (h["header_size"] != RACE_HEADER_SIZE
+            or h["sample_size"] != SUPPORTED_RACE_FORMATS[h["format_version"]]
             or h["trailer_size"] != RACE_TRAILER_SIZE):
         raise FormatError("Niezgodne rozmiary struktur wyścigu")
+    if h["format_version"] < 2:
+        h["steer_neutral_us"] = h["steer_full_us"] = 0
     return h
 
 
@@ -243,21 +250,39 @@ def parse_race(data: bytes, verify_crc: bool = True) -> Race:
     magic, n, end, _, crc = _RTRL.unpack_from(data, len(data) - RACE_TRAILER_SIZE)
     if magic != RACE_TRAILER_MAGIC:
         raise FormatError("Brak trailera wyścigu")
-    if RACE_HEADER_SIZE + n * RACE_SAMPLE_SIZE > len(data) - RACE_TRAILER_SIZE:
+    size = h["sample_size"]
+    if RACE_HEADER_SIZE + n * size > len(data) - RACE_TRAILER_SIZE:
         raise FormatError("Liczba próbek wyścigu poza plikiem")
     if verify_crc and race_crc(data) != crc:
         raise FormatError("CRC wyścigu niezgodne")
-    samples = np.frombuffer(data, RACE_SAMPLE_DTYPE, n, RACE_HEADER_SIZE).copy()
+    if size == RACE_SAMPLE_SIZE:
+        samples = np.frombuffer(data, RACE_SAMPLE_DTYPE, n, RACE_HEADER_SIZE).copy()
+    else:
+        v1 = np.frombuffer(data, RACE_SAMPLE_DTYPE_V1, n, RACE_HEADER_SIZE)
+        samples = np.zeros(n, RACE_SAMPLE_DTYPE)
+        for k in RACE_SAMPLE_DTYPE_V1.names:
+            samples[k] = v1[k]
     return Race(header=h, samples=samples, n_samples=n, end_reason=end, crc32=crc, raw=bytes(data))
 
 
-def build_race(header: dict, samples: np.ndarray, end_reason: int = 0, padding: int = 0) -> bytes:
-    """Składa plik wyścigu (testy, wektory testowe, demo). Liczy CRC."""
+def build_race(header: dict, samples: np.ndarray, end_reason: int = 0, padding: int = 0,
+               version: int | None = None) -> bytes:
+    """Składa plik wyścigu (testy, wektory testowe, demo). Liczy CRC.
+    Wersja domyślnie z próbek: z polem steer_us → 2, bez → 1."""
+    if version is None:
+        version = 2 if "steer_us" in (samples.dtype.names or ()) else 1
+    dt = RACE_SAMPLE_DTYPE if version >= 2 else RACE_SAMPLE_DTYPE_V1
     h = dict(header)
-    h.update(magic=RACE_MAGIC, format_version=SUPPORTED_RACE_FORMAT, header_size=RACE_HEADER_SIZE,
-             sample_size=RACE_SAMPLE_SIZE, trailer_size=RACE_TRAILER_SIZE)
-    vals = [h.get(k, 0) if k != "reserved" else b"\0" * 42 for k in _RHDR_FIELDS]
-    body = _RHDR.pack(*vals) + np.asarray(samples, dtype=RACE_SAMPLE_DTYPE).tobytes() + b"\xff" * padding
+    h.update(magic=RACE_MAGIC, format_version=version, header_size=RACE_HEADER_SIZE,
+             sample_size=dt.itemsize, trailer_size=RACE_TRAILER_SIZE)
+    if version < 2:
+        h["steer_neutral_us"] = h["steer_full_us"] = 0
+    smp = np.zeros(len(samples), dt)
+    for k in dt.names:
+        if k in samples.dtype.names:
+            smp[k] = samples[k]
+    vals = [h.get(k, 0) if k != "reserved" else b"\0" * 38 for k in _RHDR_FIELDS]
+    body = _RHDR.pack(*vals) + smp.tobytes() + b"\xff" * padding
     tr = struct.pack("<IIB3s", RACE_TRAILER_MAGIC, len(samples), end_reason, b"\0\0\0")
     crc = zlib.crc32(body + tr) & 0xFFFFFFFF
     return body + tr + struct.pack("<I", crc)

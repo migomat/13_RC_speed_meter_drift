@@ -16,6 +16,7 @@
 #include "race.h"
 #include "run_format.h"
 #include "sim.h"
+#include "steering.h"
 #include "throttle.h"
 #include "timebase.h"
 
@@ -23,7 +24,7 @@
 // ISR taktu zapisuje stan halla i gazu; pętla główna dokłada IMU.
 struct Tick {
   uint32_t t_us, edges, period;
-  uint16_t throttle;
+  uint16_t throttle, steer;
   uint8_t  flags;
 };
 #define TICK_RING 256   // 512 ms zapasu na zablokowaną pętlę
@@ -36,6 +37,7 @@ static void on_tick(uint32_t t) {
   HallSnapshot h;
   hall_tick_snapshot(t, &h);
   uint16_t thr = throttle_tick_width(t);
+  uint16_t steer = steering_tick_width(t);
   if (s_tick_w - s_tick_r >= TICK_RING) {
     g_tick_overflows++;
     return;
@@ -45,6 +47,7 @@ static void on_tick(uint32_t t) {
   k.edges = h.edges;
   k.period = h.period_rev_us;
   k.throttle = thr;
+  k.steer = steer;
   k.flags = h.flags | (thr ? SF_THROTTLE_VALID : 0);
   s_tick_w = s_tick_w + 1;
 }
@@ -59,7 +62,8 @@ static bool      s_imu_ok, s_flash_ok, s_ble_ok, s_hall_ok, s_thr_ok;
 // Montaż płytki: osie auta (forward, left, up) = osie płytki idx · znak, potem obrót poziomy
 // o yaw. Domyślnie z config.h, zmiana w działaniu komendą MOUNT (wynik kalibracji z aplikacji).
 Mount g_mount = {{IMU_AXIS_FORWARD, IMU_AXIS_LEFT, IMU_AXIS_UP},
-                 {IMU_SIGN_FORWARD, IMU_SIGN_LEFT, IMU_SIGN_UP}, IMU_YAW_OFFSET_DEG};
+                 {IMU_SIGN_FORWARD, IMU_SIGN_LEFT, IMU_SIGN_UP}, IMU_YAW_OFFSET_DEG,
+                 DRIFT_STEER_SIGN};
 
 static inline float car_axis(const float v[3], int k) { return v[g_mount.idx[k]] * g_mount.sign[k]; }
 
@@ -80,9 +84,18 @@ static void on_race_sample(const RaceSample& r) {
     if (!THROTTLE_FORWARD_IS_HIGHER) pct = -pct;
   }
   int rest = r.edges == 0 && fabsf(pct) < ARM_NEUTRAL_PCT;
+  // skręt jak w analizie nagrania: neutrum z nagłówka (0 = nienauczone → brak)
+  uint16_t sn = steering_neutral_learned() ? steering_neutral_us() : 0;
+  int sv = sn && r.steer_us;
+  float sp = sv ? ((int)r.steer_us - (int)sn) * 100.0f / STEER_FULL_SCALE_US : 0.0f;
   s_dp.yaw_offset_deg = g_mount.yaw_deg;
+  s_dp.steer_sign = g_mount.steer_sign;
   drift_step(&s_ds, &s_dp, (float)r.n_ticks / SAMPLE_RATE_HZ, car_axis(a, 0), car_axis(a, 1),
-             car_axis(g, 2), rest);
+             car_axis(g, 2), rest, sv, sp);
+  g_live.steer_pct = sv ? sp * (s_ds.steer_ok ? (float)drift_steer_sign(&s_ds, &s_dp) : 1.0f) : 0.0f;
+  g_live.steer_valid = sv;
+  g_live.d_cs = s_ds.cs;
+  g_live.d_steer_sign = drift_steer_sign(&s_ds, &s_dp);
   g_live.d_pts = s_ds.pts;
   g_live.d_mult = s_ds.mult;
   g_live.d_total = s_ds.total;
@@ -102,7 +115,7 @@ static float v_front_from_period(uint32_t period_us) {
   return motor_rps / FINAL_DRIVE_RATIO * (float)M_PI * FRONT_TIRE_DIAMETER_MM * 1e-3f;
 }
 
-static void process_sample(const Sample& s) {
+static void process_sample(const Sample& s, uint16_t steer_us) {
   float a[3] = {s.ax * imu_accel_scale_g(), s.ay * imu_accel_scale_g(), s.az * imu_accel_scale_g()};
   float g[3] = {s.gx * imu_gyro_scale_dps(), s.gy * imu_gyro_scale_dps(), s.gz * imu_gyro_scale_dps()};
   float pct = throttle_pct(s.throttle_us);
@@ -137,7 +150,7 @@ static void process_sample(const Sample& s) {
   g_live.zupt = s_es.zupt;
 
   // Wyścig niezależnie od loggera startów (ten w SAVING nie przyjmuje próbek).
-  race_push(s, pct, s.throttle_us != 0, throttle_neutral_learned());
+  race_push(s, pct, s.throttle_us != 0, throttle_neutral_learned(), steer_us);
   logger_push(s, pct, s.throttle_us != 0);
 }
 
@@ -165,8 +178,9 @@ static void drain_ticks(uint32_t now) {
       s.ax = s.ay = s.az = s.gx = s.gy = s.gz = 0;
       s.flags |= SF_IMU_STALE;
     }
+    uint16_t steer = k.steer;
     s_tick_r = s_tick_r + 1;
-    process_sample(s);
+    process_sample(s, steer);
   }
 }
 
@@ -228,6 +242,7 @@ void setup() {
   timebase_request_hfxo();
   s_hall_ok = hall_begin();
   s_thr_ok = throttle_begin();
+  s_thr_ok &= steering_begin();
   s_imu_ok = imu_begin();
   s_flash_ok = flash_begin();
   race_begin();                    // po skanie slotów: wspólna numeracja seq / boot
@@ -247,6 +262,7 @@ void loop() {
   now = timebase_now();
   drain_ticks(now);
   throttle_poll(now);
+  steering_poll(now);
   logger_poll();
   race_poll();
   if (logger_state() != LS_SAVING) flash_poll();
@@ -259,6 +275,9 @@ void loop() {
     s_es.v_max = vmax;
     s_ds.have_bias = 0;
     s_ds.first = 1;
+    s_ds.quiet_t = 0.0f;
+    s_ds.steer_learned = 0;     // inne auto / montaż – znak skrętu od nowa
+    s_ds.steer_ev = 0.0f;
     drift_reset_score(&s_ds);   // punkty liczone w złych osiach nic nie znaczą
   }
 

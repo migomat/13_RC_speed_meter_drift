@@ -114,12 +114,14 @@ export function parseRun(buf, { verifyCrc = true } = {}) {
 }
 
 // ------------------------------------------------------------------ wyścig
-// Plik = RaceHeader (128 B) + n × RaceSample (20 B) + [wypełnienie] + RaceTrailer (16 B).
+// Plik = RaceHeader (128 B) + n × RaceSample + [wypełnienie] + RaceTrailer (16 B).
+// Format 1: próbka 20 B; format 2 (fw 1.3): 22 B – dopisany skręt (steer_us) na końcu.
 // Trailer zawsze na końcu; CRC32 wszystkich bajtów przed polem crc32 trailera.
 export const RACE_MAGIC = 0x4C463458;
 export const RACE_TRAILER_MAGIC = 0x45463458;
-export const SUPPORTED_RACE_FORMAT = 1;
-export const RACE_SAMPLE_SIZE = 20;
+export const SUPPORTED_RACE_FORMATS = { 1: 20, 2: 22 };   // wersja → rozmiar próbki [B]
+export const SUPPORTED_RACE_FORMAT = 2;
+export const RACE_SAMPLE_SIZE = 22;
 export const RACE_TRAILER_SIZE = 16;
 export const RSF_GAP = 0x40;
 export const RACE_END_NAMES = { 0: 'postój', 1: 'pełna pamięć', 2: 'zanik zasilania', 3: 'komenda RSTOP' };
@@ -150,19 +152,20 @@ export function parseRaceHeader(buf) {
     trigger_index: U32(48), tick_rate_hz: U16(52), decim: U16(54), flags: U32(56), t0_us: U32(60),
     sample_size: U16(64), trailer_size: U16(66), fw_version: U32(68), period_unit_us: U16(72),
     pretrigger_ms: U16(74), end_idle_s: U16(76), start_pct: U8(78), hall_pullup_v_x10: U8(79),
-    hall_timeout_us: U32(80), hall_min_edge_us: U16(84),
+    hall_timeout_us: U32(80), hall_min_edge_us: U16(84), steer_neutral_us: U16(86), steer_full_us: U16(88),
   };
   if (h.magic !== RACE_MAGIC) throw new FormatError(`Zły magic wyścigu 0x${h.magic.toString(16)}`);
-  if (h.format_version !== SUPPORTED_RACE_FORMAT) throw new FormatError(`Nieobsługiwana wersja formatu wyścigu ${h.format_version}`);
-  if (h.header_size !== HEADER_SIZE || h.sample_size !== RACE_SAMPLE_SIZE || h.trailer_size !== RACE_TRAILER_SIZE) {
+  if (!SUPPORTED_RACE_FORMATS[h.format_version]) throw new FormatError(`Nieobsługiwana wersja formatu wyścigu ${h.format_version}`);
+  if (h.header_size !== HEADER_SIZE || h.sample_size !== SUPPORTED_RACE_FORMATS[h.format_version] || h.trailer_size !== RACE_TRAILER_SIZE) {
     throw new FormatError('Niezgodne rozmiary struktur wyścigu');
   }
+  if (h.format_version < 2) { h.steer_neutral_us = 0; h.steer_full_us = 0; }
   return h;
 }
 
 /**
  * Dekoduje wyścig. Zwraca {header, n, end_reason, crc32, edges, period_rev, throttle_us,
- * ax..gz, flags, n_ticks, t_s (koniec próbki względem próbki z gazem)}.
+ * ax..gz, flags, n_ticks, steer_us (format 1: 0), t_s (koniec próbki względem próbki z gazem)}.
  */
 export function parseRace(buf, { verifyCrc = true } = {}) {
   const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
@@ -174,18 +177,19 @@ export function parseRace(buf, { verifyCrc = true } = {}) {
   const ns = dv.getUint32(to + 4, true);
   const endReason = dv.getUint8(to + 8);
   const crc = dv.getUint32(to + 12, true);
-  if (HEADER_SIZE + ns * RACE_SAMPLE_SIZE > to) throw new FormatError('Liczba próbek wyścigu poza plikiem');
+  const size = h.sample_size;
+  if (HEADER_SIZE + ns * size > to) throw new FormatError('Liczba próbek wyścigu poza plikiem');
   if (verifyCrc && raceCrc(u8) !== crc) throw new FormatError('CRC wyścigu niezgodne');
   const r = {
     header: h, n: ns, end_reason: endReason, crc32: crc,
     edges: new Uint16Array(ns), period_rev: new Uint16Array(ns), throttle_us: new Uint16Array(ns),
     ax: new Int16Array(ns), ay: new Int16Array(ns), az: new Int16Array(ns),
     gx: new Int16Array(ns), gy: new Int16Array(ns), gz: new Int16Array(ns),
-    flags: new Uint8Array(ns), n_ticks: new Uint8Array(ns), t_s: new Float64Array(ns),
+    flags: new Uint8Array(ns), n_ticks: new Uint8Array(ns), steer_us: new Uint16Array(ns), t_s: new Float64Array(ns),
   };
   let ticks = 0;
   for (let i = 0; i < ns; i++) {
-    const o = HEADER_SIZE + i * RACE_SAMPLE_SIZE;
+    const o = HEADER_SIZE + i * size;
     r.edges[i] = dv.getUint16(o, true);
     r.period_rev[i] = dv.getUint16(o + 2, true);
     r.throttle_us[i] = dv.getUint16(o + 4, true);
@@ -193,6 +197,7 @@ export function parseRace(buf, { verifyCrc = true } = {}) {
     r.gx[i] = dv.getInt16(o + 12, true); r.gy[i] = dv.getInt16(o + 14, true); r.gz[i] = dv.getInt16(o + 16, true);
     r.flags[i] = dv.getUint8(o + 18);
     r.n_ticks[i] = dv.getUint8(o + 19);
+    if (size >= 22) r.steer_us[i] = dv.getUint16(o + 20, true);
     ticks += r.n_ticks[i];
     r.t_s[i] = ticks / h.tick_rate_hz;
   }

@@ -32,6 +32,9 @@
   "drift": {
    "lpf_tau_s": 0.05,
    "bias_tau_s": 1.0,
+   "rest_da_g": 0.05,
+   "rest_dr_dps": 3.0,
+   "rest_min_s": 1.5,
    "v_tau_s": 0.15,
    "vdot_tau_s": 0.3,
    "steady_yaw_acc_dps2": 150.0,
@@ -39,6 +42,7 @@
    "max_dt_s": 0.2,
    "min_yaw_dps": 30.0,
    "min_acc_g": 0.3,
+   "min_acc_cs_g": 0.15,
    "min_v_mps": 1.5,
    "v_max_mps": 30.0,
    "min_angle_deg": 15.0,
@@ -49,7 +53,13 @@
    "pts_per_m": 10.0,
    "pts_per_m_deg": 1.0,
    "max_mult": 10,
-   "spin_loses_chain": 1
+   "spin_loses_chain": 1,
+   "steer_sign": 0,
+   "steer_learn_s": 3.0,
+   "learn_drift_deg": 30.0,
+   "cs_min_pct": 8.0,
+   "cs_required": 1,
+   "angle_no_cs_deg": 35.0
   }
  },
  "metrics": {

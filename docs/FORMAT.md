@@ -87,14 +87,17 @@ F8 pobrany), `+12 długość`, `+16 CRC` (= crc32 startu). Dane startu od offset
 | 0x000000–0x0FFFFF | 8 slotów startów po 128 kB (`FLASH_NUM_SLOTS`) – bufor pierścieniowy |
 | 0x100000–0x1FFFFF | obszar wyścigów 1 MB (`RACE_AREA_*`) – zapis po kolei, kasowanie w całości |
 
-# Format pliku wyścigu (wersja 1)
+# Format pliku wyścigu (wersja 2; wersja 1 nadal czytana)
 
-Ciągły zapis całego wyścigu, `RACE_RATE_HZ` = 20 Hz (fw 1.2; fw 1.1: 50 Hz – częstotliwość zawsze z nagłówka). Źródło prawdy: `run_format.h`
+Ciągły zapis całego wyścigu, `RACE_RATE_HZ` = 20 Hz (fw 1.2+; fw 1.1: 50 Hz – częstotliwość zawsze z nagłówka).
+Wersja 1 (fw 1.1–1.2): próbka 20 B. **Wersja 2 (fw 1.3)**: próbka 22 B – na końcu dopisany skręt
+(`steer_us`), w nagłówku neutrum skrętu. Dekodery czytają obie (rozmiar próbki z nagłówka).
+Aplikacja sprzed wersji 1.5 nie czyta wersji 2. Źródło prawdy: `run_format.h`
 (`RaceHeader`, `RaceSample`, `RaceTrailer`); dekodery: `format.js` (`parseRace`),
 `parse.py` (`parse_race`). Zmiana = podbicie `RACE_FORMAT_VERSION` we wszystkich trzech.
 
 ```
-[RaceHeader 128 B][RaceSample × n (20 B)][wypełnienie – opcjonalne][RaceTrailer 16 B]
+[RaceHeader 128 B][RaceSample × n (20 B / 22 B)][wypełnienie – opcjonalne][RaceTrailer 16 B]
 ```
 
 Trailer to zawsze ostatnie 16 B pliku. Wypełnienie pojawia się tylko w wyścigu
@@ -103,30 +106,32 @@ parser je pomija, CRC je obejmuje.
 
 ## RaceHeader (128 B)
 
-Pola 0–47 jak w `RunHeader` (magic `0x4C463458` „X4FL”, `format_version` = 1, seq –
+Pola 0–47 jak w `RunHeader` (magic `0x4C463458` „X4FL”, `format_version` = 2 (1), seq –
 wspólna numeracja ze startami, unix_s, boot_count, uptime_ms w chwili gazu, konfiguracja
-halla, `sample_rate_hz` = 50, zakresy i skale IMU, neutrum gazu). Dalej:
+halla, `sample_rate_hz` = 20 (50), zakresy i skale IMU, neutrum gazu). Dalej:
 
 | off | typ | pole | opis |
 |---|---|---|---|
-| 48 | u32 | trigger_index | indeks próbki, w której wciśnięto gaz (przed nią 1 s postoju) |
+| 48 | u32 | trigger_index | indeks próbki, w której wciśnięto gaz (przed nią `pretrigger_ms` postoju) |
 | 52 | u16 | tick_rate_hz | 500 – jednostka `n_ticks` |
 | 54 | u16 | decim | taktów na próbkę (25 przy 20 Hz, 10 przy 50 Hz) |
 | 56 | u32 | flags | jak w starcie (czas ustawiony, neutrum, błąd IMU, dane syntetyczne) |
 | 60 | u32 | t0_us | zegar Xiao na końcu pierwszej próbki |
-| 64 | u16 | sample_size | 20 |
+| 64 | u16 | sample_size | 22 (wersja 1: 20) |
 | 66 | u16 | trailer_size | 16 |
 | 68 | u32 | fw_version | |
 | 72 | u16 | period_unit_us | 4 |
-| 74 | u16 | pretrigger_ms | 1000 |
+| 74 | u16 | pretrigger_ms | 3000 (fw ≤ 1.2: 1000) |
 | 76 | u16 | end_idle_s | 30 |
 | 78 | u8 | start_pct | 30 |
 | 79 | u8 | hall_pullup_v_x10 | |
 | 80 | u32 | hall_timeout_us | |
 | 84 | u16 | hall_min_edge_us | |
-| 86 | 42 B | reserved | zera |
+| 86 | u16 | steer_neutral_us | wersja 2: neutrum skrętu, 0 = nienauczone / brak (wersja 1: 0) |
+| 88 | u16 | steer_full_us | wersja 2: neutrum → pełny skręt [µs] (500) |
+| 90 | 38 B | reserved | zera |
 
-## RaceSample (20 B) – średnia z `decim` taktów 500 Hz
+## RaceSample (22 B; wersja 1: 20 B) – średnia z `decim` taktów 500 Hz
 
 ```c
 uint16_t edges;        // przyrost licznika zboczy w okresie próbki (droga = Σ edges / EDGES_PER_REV · obwód/FDR)
@@ -135,8 +140,12 @@ uint16_t throttle_us;  // średnia z poprawnych impulsów, 0 = brak sygnału
 int16_t  ax, ay, az;   // średnie surowe LSB (uśrednienie = filtr antyaliasingowy)
 int16_t  gx, gy, gz;
 uint8_t  flags;        // bity 0–5 jak w Sample (OR z okresu), 0x40 przerwa (zgubione próbki), bit 7 zawsze 0
-uint8_t  n_ticks;      // czas próbki w taktach 2 ms (zwykle 10; więcej po przerwie), 1..254
+uint8_t  n_ticks;      // czas próbki w taktach 2 ms (zwykle 25; więcej po przerwie), 1..254
+uint16_t steer_us;     // wersja 2: średnia szerokość impulsu skrętu, 0 = brak sygnału
 ```
+
+Skręt [%] = (steer_us − steer_neutral_us) · 100 / steer_full_us, znak surowy – kierunek „w lewo”
+rozpoznaje analiza driftu (nauka w jeździe albo kalibracja).
 
 Czas próbki = Σ n_ticks / tick_rate_hz (koniec próbki), względem próbki `trigger_index`.
 Bit 7 flag = 0 i `n_ticks` ≠ 0xFF odróżniają próbkę od skasowanego flash (odtwarzanie po zaniku zasilania).

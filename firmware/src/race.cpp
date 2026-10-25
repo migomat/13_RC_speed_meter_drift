@@ -7,6 +7,7 @@
 #include "flash_store.h"
 #include "imu.h"
 #include "logger.h"
+#include "steering.h"
 #include "throttle.h"
 
 #define PREFIX_MAGIC   0x50463458u   // "X4FP"
@@ -38,8 +39,8 @@ static void    (*s_sample_cb)(const RaceSample&);
 // Uśrednianie taktów do jednej próbki
 static struct {
   int32_t  a[6];
-  uint32_t thr_sum;
-  uint16_t thr_n;
+  uint32_t thr_sum, steer_sum;
+  uint16_t thr_n, steer_n;
   uint8_t  n;
   uint8_t  flags;       // OR: SF_THROTTLE_VALID | SF_IMU_*
   bool     start_hit;   // gaz > RACE_START_PCT
@@ -324,6 +325,8 @@ static void start_record(RaceSample& cur, uint32_t cur_t) {
   s_hdr.hall_pullup_v_x10 = HALL_PULLUP_V_X10;
   s_hdr.hall_timeout_us = HALL_TIMEOUT_US;
   s_hdr.hall_min_edge_us = HALL_MIN_EDGE_US;
+  s_hdr.steer_neutral_us = steering_neutral_learned() ? steering_neutral_us() : 0;
+  s_hdr.steer_full_us = STEER_FULL_SCALE_US;
 
   s_appended = s_flushed = 0;
   s_crc = crc32_begin();
@@ -405,7 +408,7 @@ void race_poll(void) {
 }
 
 // ------------------------------------------------------------ próbki
-void race_push(const Sample& s, float pct, bool thr_valid, bool learned) {
+void race_push(const Sample& s, float pct, bool thr_valid, bool learned, uint16_t steer_us) {
   bool moving = s.hall_edges != s_tick_edges;
   s_tick_edges = s.hall_edges;
   // Próbki 20 Hz powstają zawsze (punkty driftu liczone na żywo także przy pełnej pamięci);
@@ -416,6 +419,10 @@ void race_push(const Sample& s, float pct, bool thr_valid, bool learned) {
   if (thr_valid) {
     s_acc.thr_sum += s.throttle_us;
     s_acc.thr_n++;
+  }
+  if (steer_us) {
+    s_acc.steer_sum += steer_us;
+    s_acc.steer_n++;
   }
   s_acc.flags |= s.flags & (SF_THROTTLE_VALID | SF_IMU_OVERRUN | SF_IMU_STALE);
   if (thr_valid && learned && pct > RACE_START_PCT) s_acc.start_hit = true;
@@ -428,6 +435,7 @@ void race_push(const Sample& s, float pct, bool thr_valid, bool learned) {
   uint32_t per = s.period_rev_us ? (s.period_rev_us + RACE_PERIOD_UNIT_US / 2) / RACE_PERIOD_UNIT_US : 0;
   r.period_rev = per > 0xFFFF ? 0 : (per == 0 && s.period_rev_us ? 1 : (uint16_t)per);
   r.throttle_us = s_acc.thr_n ? (uint16_t)((s_acc.thr_sum + s_acc.thr_n / 2) / s_acc.thr_n) : 0;
+  r.steer_us = s_acc.steer_n ? (uint16_t)((s_acc.steer_sum + s_acc.steer_n / 2) / s_acc.steer_n) : 0;
   int16_t avg[6];
   for (int i = 0; i < 6; i++) avg[i] = (int16_t)lroundf((float)s_acc.a[i] / s_acc.n);
   r.ax = avg[0]; r.ay = avg[1]; r.az = avg[2];

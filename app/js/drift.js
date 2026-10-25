@@ -6,17 +6,22 @@ import { mapAxes } from './axes.js';
 
 const G = 9.80665;
 const D2R = Math.PI / 180;
+const T_EPS = 1e-3;   // [s] margines porównań sumowanych czasów (jak drift.py / drift.c)
 
 export const DEFAULT_DRIFT = {
   lpf_tau_s: 0.05,        // [s] filtr przyspieszeń i ω
   bias_tau_s: 1.0,        // [s] uśrednianie biasu w postoju
+  rest_da_g: 0.05,        // [g] maks. zmiana a między próbkami w postoju
+  rest_dr_dps: 3.0,       // [dps] maks. zmiana ω między próbkami w postoju
+  rest_min_s: 1.5,        // [s] tak długo spokojnie (bez gazu) = postój
   v_tau_s: 0.15,          // [s] filtr prędkości z promienia skrętu
   vdot_tau_s: 0.3,        // [s] filtr przyspieszenia stycznego
   steady_yaw_acc_dps2: 150.0, // [dps/s] powyżej – przyspieszenie styczne nieznane
   steady_s: 0.25,         // [s] po wejściu w łuk – przyspieszenie styczne nieznane
   max_dt_s: 0.2,          // [s] ograniczenie kroku
   min_yaw_dps: 30.0,      // [dps] poniżej – jazda prosto
-  min_acc_g: 0.3,         // [g] poniżej – kąt nieokreślony
+  min_acc_g: 0.3,         // [g] poniżej – kąt nieokreślony (skręt nieznany)
+  min_acc_cs_g: 0.15,     // [g] jw., gdy kontra wymagana (skręt znany)
   min_v_mps: 1.5,         // [m/s]
   v_max_mps: 30.0,        // [m/s]
   min_angle_deg: 15.0,    // [deg] kąt, od którego liczy się drift
@@ -28,6 +33,12 @@ export const DEFAULT_DRIFT = {
   pts_per_m_deg: 1.0,     // punkty za metr × stopień kąta
   max_mult: 10,           // maks. mnożnik
   spin_loses_chain: 1,    // 1 = obrót kasuje łańcuch, 0 = zalicza
+  steer_sign: 0,          // skręt: 1 normalny, −1 odwrócony, 0 = automatycznie (nauka)
+  steer_learn_s: 3.0,     // [s] zgodnej przewagi do ustalenia znaku skrętu
+  learn_drift_deg: 30.0,  // [deg] drift tak głęboki, że skręt = kontra
+  cs_min_pct: 8.0,        // [%] skręt od neutrum uznany za kontrę
+  cs_required: 1,         // 1 = przy znanym skręcie drift wymaga kontry (albo dużego kąta)
+  angle_no_cs_deg: 35.0,  // [deg] od tego kąta drift także bez kontry
 };
 
 export function driftParams(settings) {
@@ -38,9 +49,11 @@ export function driftParams(settings) {
 
 export function driftInit() {
   return {
+    have_prev: false, p_af: 0, p_al: 0, p_r: 0, quiet_t: 0,
     have_bias: false, b_af: 0, b_al: 0, b_r: 0,
     first: true, f_af: 0, f_al: 0, f_r: 0,
     corner: false, corner_t: 0, r_prev: 0, v: 0, vdot: 0, angle: 0, spin_t: 0,
+    steer_ev: 0, steer_learned: 0, steer: NaN, cs: false,
     in_drift: false, seg_t: 0, seg_dir: 0, seg_ok: false,
     chain: false, chain_ok: false, prev_dir: 0, grace_t: 0,
     pts: 0, mult: 1, total: 0, best: 0, last: 0,
@@ -70,7 +83,10 @@ export function driftResetScore(s) {
     n_trans: 0, drift_t: 0, angle_max: 0 });
 }
 
-export function driftStep(s, p, dt, aFwd, aLeft, rDps, rest) {
+/** Znak skrętu w użyciu: ustawiony albo nauczony (0 = nieznany). */
+export function steerSignOf(s, p) { return p.steer_sign ? Math.trunc(p.steer_sign) : s.steer_learned; }
+
+export function driftStep(s, p, dt, aFwd, aLeft, rDps, restHint, steerRaw = NaN) {
   if (dt <= 0) return;
   dt = Math.min(dt, p.max_dt_s);
   const yaw = p.yaw_offset_deg * D2R;
@@ -78,7 +94,12 @@ export function driftStep(s, p, dt, aFwd, aLeft, rDps, rest) {
   let af = aFwd * c + aLeft * sn;
   let al = -aFwd * sn + aLeft * c;
 
-  if (rest) {
+  const quiet = s.have_prev && Math.abs(af - s.p_af) < p.rest_da_g &&
+    Math.abs(al - s.p_al) < p.rest_da_g && Math.abs(rDps - s.p_r) < p.rest_dr_dps;
+  s.p_af = af; s.p_al = al; s.p_r = rDps;
+  s.have_prev = true;
+  s.quiet_t = (restHint && quiet) ? s.quiet_t + dt : 0;
+  if (s.quiet_t >= p.rest_min_s - T_EPS) {
     if (!s.have_bias) {
       s.b_af = af; s.b_al = al; s.b_r = rDps;
       s.have_bias = true;
@@ -104,14 +125,19 @@ export function driftStep(s, p, dt, aFwd, aLeft, rDps, rest) {
   }
   const fa = s.f_af, fl = s.f_al, fr = s.f_r;
 
+  const sgn = steerSignOf(s, p);
+  const steerOk = sgn !== 0 && !Number.isNaN(steerRaw);
+  s.steer = steerOk ? steerRaw * sgn : NaN;
+  const gate = steerOk && !!p.cs_required;
+
   const amag = Math.sqrt(fa * fa + fl * fl);
   const rr = Math.abs(fr);
-  const corner = rr >= p.min_yaw_dps && amag >= p.min_acc_g;
+  const corner = rr >= p.min_yaw_dps && amag >= (gate ? p.min_acc_cs_g : p.min_acc_g);
   let angle = 0, d = 0;
   if (corner) {
     const vRaw = Math.min(amag * G / (rr * D2R), p.v_max_mps);
     s.corner_t = s.corner ? s.corner_t + dt : 0;
-    if (s.corner_t < p.steady_s) {
+    if (s.corner_t < p.steady_s - T_EPS) {
       s.v = vRaw;
       s.vdot = 0;
     } else {
@@ -136,10 +162,21 @@ export function driftStep(s, p, dt, aFwd, aLeft, rDps, rest) {
   s.r_prev = fr;
   s.angle = angle;
 
-  s.spin_t = (corner && Math.abs(angle) > p.spin_angle_deg) ? s.spin_t + dt : 0;
-  const drifting = corner && s.v >= p.min_v_mps && angle >= p.min_angle_deg && angle <= p.spin_angle_deg;
+  if (!p.steer_sign && s.steer_learned === 0 && corner && !Number.isNaN(steerRaw) &&
+      Math.abs(steerRaw) >= p.cs_min_pct) {
+    const agree = steerRaw * fr > 0 ? 1 : -1;
+    if (Math.abs(angle) < p.min_angle_deg) s.steer_ev += dt * agree;
+    else if (angle >= p.learn_drift_deg) s.steer_ev -= dt * agree;
+    if (Math.abs(s.steer_ev) >= p.steer_learn_s - T_EPS) s.steer_learned = s.steer_ev > 0 ? 1 : -1;
+  }
 
-  if (s.chain && s.spin_t >= p.spin_s) {
+  const st = s.steer;
+  s.cs = corner && steerOk && Math.abs(st) >= p.cs_min_pct && ((st > 0) === (d < 0));
+  const drifting = corner && s.v >= p.min_v_mps && angle >= p.min_angle_deg && angle <= p.spin_angle_deg &&
+    (!gate || s.cs || angle >= p.angle_no_cs_deg);
+  s.spin_t = (corner && Math.abs(angle) > p.spin_angle_deg) ? s.spin_t + dt : 0;
+
+  if (s.chain && s.spin_t >= p.spin_s - T_EPS) {
     if (p.spin_loses_chain) {
       s.n_lost += 1;
       s.chain_ok = false;
@@ -162,7 +199,7 @@ export function driftStep(s, p, dt, aFwd, aLeft, rDps, rest) {
     }
     s.seg_t += dt;
     s.grace_t = 0;
-    if (!s.seg_ok && s.seg_t >= p.min_seg_s) {
+    if (!s.seg_ok && s.seg_t >= p.min_seg_s - T_EPS) {
       s.seg_ok = true;
       s.chain_ok = true;
       if (s.prev_dir !== 0 && s.seg_dir !== s.prev_dir) {
@@ -178,7 +215,7 @@ export function driftStep(s, p, dt, aFwd, aLeft, rDps, rest) {
     s.in_drift = false;
     if (s.chain) {
       s.grace_t += dt;
-      if (s.grace_t >= p.chain_gap_s) bank(s);
+      if (s.grace_t >= p.chain_gap_s - T_EPS) bank(s);
     }
   }
 }
@@ -206,30 +243,45 @@ export function raceInputs(race, settings) {
   const [, , gu] = mapAxes(sc(race.gx, kg), sc(race.gy, kg), sc(race.gz, kg), axes);
   const dt = new Float64Array(race.n);
   for (let i = 0; i < race.n; i++) dt[i] = race.n_ticks[i] / h.tick_rate_hz;
-  return { dt, af, al, gu, rest: restMask(race) };
+  return { dt, af, al, gu, rest: restMask(race), steer: steerPct(race) };
+}
+
+/** Skręt [% od neutrum, znak surowy]; NaN = brak sygnału, nienauczone neutrum albo format 1. */
+export function steerPct(race) {
+  const h = race.header;
+  const neutral = h.steer_neutral_us || 0, full = h.steer_full_us || 500;
+  const out = new Float64Array(race.n).fill(NaN);
+  if (!neutral || !race.steer_us) return out;
+  for (let i = 0; i < race.n; i++) {
+    const w = race.steer_us[i];
+    if (w) out[i] = (w - neutral) * 100 / full;
+  }
+  return out;
 }
 
 /** Przebiegi i podsumowanie punktów za drift dla nagrania wyścigu – jak drift_score(). */
 export function driftScore(race, settings) {
   const p = driftParams(settings);
-  const { dt, af, al, gu, rest } = raceInputs(race, settings);
+  const { dt, af, al, gu, rest, steer } = raceInputs(race, settings);
   const n = dt.length;
   const s = driftInit();
   const out = {};
-  for (const k of ['angle', 'v', 'pts', 'mult', 'total', 'drift']) out[k] = new Float64Array(n);
+  for (const k of ['angle', 'v', 'pts', 'mult', 'total', 'drift', 'steer', 'cs']) out[k] = new Float64Array(n);
   for (let i = 0; i < n; i++) {
-    driftStep(s, p, dt[i], af[i], al[i], gu[i], rest[i]);
+    driftStep(s, p, dt[i], af[i], al[i], gu[i], rest[i], steer[i]);
     out.angle[i] = s.angle;
     out.v[i] = s.corner ? s.v : 0;
     out.pts[i] = s.pts;
     out.mult[i] = s.mult;
     out.total[i] = s.total;
     out.drift[i] = s.in_drift ? 1 : 0;
+    out.steer[i] = s.steer;
+    out.cs[i] = s.cs ? 1 : 0;
   }
   const end = { ...s };
   bank(end);
   const summary = { total: end.total, best_chain: end.best, chains: end.n_banks, transitions: s.n_trans,
-    spins: s.n_lost, drift_time_s: s.drift_t, angle_max_deg: s.angle_max };
+    spins: s.n_lost, drift_time_s: s.drift_t, angle_max_deg: s.angle_max, steer_sign: steerSignOf(s, p) };
   out.t = race.t_s;
   return { series: out, summary };
 }
@@ -248,8 +300,8 @@ export const DRIFT_SUMMARY_LABELS = {
 const remainder2pi = (x) => x - 2 * Math.PI * Math.round(x / (2 * Math.PI));
 
 /**
- * Orientacja płytki z nagrania jazdy BEZ driftu – jak mount_calibrate() w drift.py.
- * Zwraca {imu_axes, yaw_offset_deg, samples, spread_deg}; wyjątek, gdy za mało danych.
+ * Orientacja płytki i znak skrętu z nagrania jazdy BEZ driftu – jak mount_calibrate() w drift.py.
+ * Zwraca {imu_axes, yaw_offset_deg, samples, spread_deg, steer_sign}; wyjątek, gdy za mało danych.
  */
 export function mountCalibrate(race, { minYawDps = 40, minAccG = 0.1, lpfTauS = 0.15, trimDeg = 25 } = {}) {
   const h = race.header;
@@ -258,6 +310,8 @@ export function mountCalibrate(race, { minYawDps = 40, minAccG = 0.1, lpfTauS = 
   const a = [race.ax, race.ay, race.az].map((x) => Array.from(x, (v) => v * ka));
   const g = [race.gx, race.gy, race.gz].map((x) => Array.from(x, (v) => v * kg));
   const rest = restMask(race);
+  const steer = steerPct(race);
+  let stSum = 0, stAbs = 0;
   const ti = h.trigger_index;
   let ri = [];
   for (let i = 0; i < n; i++) if (rest[i] && i < ti) ri.push(i);
@@ -279,9 +333,15 @@ export function mountCalibrate(race, { minYawDps = 40, minAccG = 0.1, lpfTauS = 
       const k = dt / (lpfTauS + dt);
       f1 += k * (h1 - f1); f2 += k * (h2 - f2); fr += k * (r - fr);
     }
-    if (Math.abs(fr) >= minYawDps && Math.hypot(f1, f2) >= minAccG && race.edges[i] > 0) {
+    // skręt ω ≥ minYawDps oznacza jazdę (bez wymogu zboczy – auto może nie mieć halla)
+    if (Math.abs(fr) >= minYawDps && Math.hypot(f1, f2) >= minAccG) {
       const s = fr > 0 ? 1 : -1;
-      pts.push([Math.atan2(f2 * s, f1 * s), Math.abs(fr) * Math.hypot(f1, f2)]);
+      const w = Math.abs(fr) * Math.hypot(f1, f2);
+      pts.push([Math.atan2(f2 * s, f1 * s), w]);
+      if (!Number.isNaN(steer[i]) && Math.abs(steer[i]) >= 8) {
+        stSum += w * (steer[i] * fr > 0 ? 1 : -1);
+        stAbs += w;
+      }
     }
   }
   if (pts.length < 20) throw new Error('Za mało zakrętów w nagraniu (potrzebne kilka okrążeń)');
@@ -304,6 +364,7 @@ export function mountCalibrate(race, { minYawDps = 40, minAccG = 0.1, lpfTauS = 
   const sn = pts.reduce((x, [t]) => x + Math.sin(t), 0) / pts.length;
   const R = Math.min(1, Math.hypot(c, sn));
   const spread = Math.sqrt(Math.max(0, -2 * Math.log(Math.max(R, 1e-9)))) / D2R;
+  const steerSign = stAbs > 0 && Math.abs(stSum) >= 0.6 * stAbs ? (stSum > 0 ? 1 : -1) : 0;
   return { imu_axes: { forward: spec(q), left: spec(q + 90), up: (us > 0 ? '+' : '-') + names[up] },
-    yaw_offset_deg: yaw, samples: sel.length, spread_deg: spread };
+    yaw_offset_deg: yaw, samples: sel.length, spread_deg: spread, steer_sign: steerSign };
 }
