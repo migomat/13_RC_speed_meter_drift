@@ -53,5 +53,7 @@ uint32_t    race_current_s(void);   // długość bieżącego nagrania [s]
 uint32_t    race_overflows(void);   // próbki zgubione przez pełny bufor RAM
 uint32_t    race_scan_ms(void);     // czas skanu przy starcie
 void        race_set_sim_flag(bool on);
+// Wołane dla każdej próbki RACE_RATE_HZ, niezależnie od stanu pamięci (punkty driftu)
+void        race_set_sample_cb(void (*cb)(const RaceSample&));
 void        race_set_limit(uint32_t bytes);     // SIM: mniejszy obszar (0 = pełny)
 void        race_set_reset_at(uint32_t n);      // SIM: reset po n próbkach (test zaniku zasilania)

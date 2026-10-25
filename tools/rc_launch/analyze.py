@@ -24,6 +24,7 @@ from pathlib import Path
 
 import numpy as np
 
+from .drift import DEFAULT_DRIFT
 from .estimator import DEFAULT_PARAMS, EstState, est_step
 from .parse import RSF_GAP, Race, Run, file_kind, parse_race, parse_run
 
@@ -43,6 +44,7 @@ DEFAULT_CONFIG = dict(
     race_track_points=200,
     race_track_v_lowpass_hz=2.0,
     estimator=dict(DEFAULT_PARAMS),
+    drift=dict(DEFAULT_DRIFT),
 )
 
 

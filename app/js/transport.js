@@ -4,6 +4,8 @@
 // CapacitorBleTransport (@capacitor-community/bluetooth-le) z tym samym interfejsem.
 
 import { crc32, runCrc, parseHeader, raceCrc, parseRace } from './format.js';
+import { driftInit, driftStep, driftParams, driftResetScore, raceInputs } from './drift.js';
+import { DEFAULT_SETTINGS } from './analysis.js';
 
 export const NUS_SERVICE = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
 export const NUS_RX = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
@@ -128,6 +130,10 @@ export class DemoTransport {
     this.mtuPayload = 243;
     this.races = [];        // {seq, data, crc, unix, boot, uptime_ms, n, end, read}
     this.raceState = 'IDLE';
+    this.driftRace = null;  // nagranie z driftem odtwarzane w LIVE (punkty jak na Xiao)
+    this.drift = driftInit();
+    this.driftI = 0;
+    this.mount = ['+x', '+y', '+z', 0];
   }
 
   onFrame(cb) { this.frameCb = cb; }
@@ -142,6 +148,12 @@ export class DemoTransport {
       this.runs.push(this._wrap(raw, k++));
     }
     await this._loadRaces();
+    try {
+      const idx = await (await fetch(this.baseUrl + 'drift.json')).json();
+      const raw = new Uint8Array(await (await fetch(this.baseUrl + idx[0] + '.bin')).arrayBuffer());
+      const race = parseRace(raw);
+      this.driftRace = { race, inp: raceInputs(race, DEFAULT_SETTINGS) };
+    } catch (e) { this.driftRace = null; }
   }
 
   async _loadRaces() {
@@ -213,6 +225,12 @@ export class DemoTransport {
       this.runs.push(this._wrap(raw, this.runs.length));
     }
     await this._loadRaces();
+    try {
+      const idx = await (await fetch(this.baseUrl + 'drift.json')).json();
+      const raw = new Uint8Array(await (await fetch(this.baseUrl + idx[0] + '.bin')).arrayBuffer());
+      const race = parseRace(raw);
+      this.driftRace = { race, inp: raceInputs(race, DEFAULT_SETTINGS) };
+    } catch (e) { this.driftRace = null; }
   }
 
   async _emit(type, bytes) {
@@ -237,9 +255,9 @@ export class DemoTransport {
     const [cmd, ...args] = text.trim().split(/\s+/);
     switch (cmd) {
       case 'INFO':
-        return this._text(JSON.stringify({ fw: '1.1.0-demo', format: 1, proto: 2, hall_lines: 1, pole_pairs: 1,
+        return this._text(JSON.stringify({ fw: '1.2.0-demo', format: 1, proto: 3, hall_lines: 1, pole_pairs: 1,
           edges_per_rev: 2, slot_size: 131072, slots: 8, sample_rate: 500, get_block_max: 4096, name: this.name,
-          race_rate: 50, race_area: 1048576, race_sample_size: 20 }));
+          race_rate: 20, race_area: 1048576, race_sample_size: 20, drift: 1, gyro_range: 1000, mount: this.mount }));
       case 'STATUS':
         return this._text(JSON.stringify({ state: 'IDLE', neutral_us: 1500, neutral_learned: true, throttle_ok: true,
           runs: this.runs.length, free_slots: Math.max(0, 8 - this.runs.length), overwritten_unread: this.overwritten,
@@ -298,6 +316,12 @@ export class DemoTransport {
       case 'VMAX':
         this.vmax = 0;
         return this._text('OK');
+      case 'DRIFT':
+        driftResetScore(this.drift);
+        return this._text('OK');
+      case 'MOUNT':
+        if (args.length >= 4) this.mount = [args[0], args[1], args[2], +parseFloat(args[3]).toFixed(1)];
+        return this._text(JSON.stringify({ mount: this.mount }));
       case 'LIVE':
         if (args[0] === '1') this._startLive(); else this._stopLive();
         return this._text('OK');
@@ -331,8 +355,23 @@ export class DemoTransport {
         rpm: Math.round(vf / (Math.PI * 0.064) * 5 * 60), thr, thr_pct: (thr - 1500) / 5, ax: +ax.toFixed(3),
         zupt: v === 0 ? 1 : 0, state: thr > 1600 && t < 5.5 ? 'RECORDING' : 'IDLE',
         race: t >= 2 && t < 12 ? 'RECORDING' : 'IDLE', race_s: Math.max(0, Math.round(t - 2)) };
+      Object.assign(msg, this._driftTick());
       this._text(JSON.stringify(msg));
     }, 50);
+  }
+
+  // Kolejna próbka nagrania z driftem (20 Hz = tempo LIVE) przez ten sam algorytm co Xiao.
+  _driftTick() {
+    const d = this.driftRace;
+    if (!d) return {};
+    const { dt, af, al, gu, rest } = d.inp;
+    const i = this.driftI;
+    this.driftI = (i + 1) % dt.length;
+    driftStep(this.drift, driftParams(DEFAULT_SETTINGS), dt[i], af[i], al[i], gu[i], rest[i]);
+    const s = this.drift;
+    return { d_pts: Math.round(s.pts), d_mult: s.mult, d_total: Math.round(s.total), d_last: Math.round(s.last),
+      d_best: Math.round(s.best), d_ang: s.corner ? +s.angle.toFixed(1) : 0, d_on: s.in_drift ? 1 : 0,
+      d_chain: s.chain ? 1 : 0, d_banks: s.n_banks, d_lost: s.n_lost, d_trans: s.n_trans };
   }
 
   _stopLive() {

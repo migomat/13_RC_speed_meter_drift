@@ -33,6 +33,7 @@ static uint32_t  s_write_addr = RACE_AREA_ADDR;   // początek następnego rekor
 static uint32_t  s_limit = AREA_END;
 static uint32_t  s_scan_ms, s_overflows, s_reset_at;
 static bool      s_sim;
+static void    (*s_sample_cb)(const RaceSample&);
 
 // Uśrednianie taktów do jednej próbki
 static struct {
@@ -407,7 +408,8 @@ void race_poll(void) {
 void race_push(const Sample& s, float pct, bool thr_valid, bool learned) {
   bool moving = s.hall_edges != s_tick_edges;
   s_tick_edges = s.hall_edges;
-  if (s_state != RS_IDLE && s_state != RS_RECORDING) return;
+  // Próbki 20 Hz powstają zawsze (punkty driftu liczone na żywo także przy pełnej pamięci);
+  // stan pamięci decyduje tylko o zapisie.
 
   s_acc.a[0] += s.ax; s_acc.a[1] += s.ay; s_acc.a[2] += s.az;
   s_acc.a[3] += s.gx; s_acc.a[4] += s.gy; s_acc.a[5] += s.gz;
@@ -439,6 +441,8 @@ void race_push(const Sample& s, float pct, bool thr_valid, bool learned) {
   s_prev_edges = s.hall_edges;
   s_prev_t = s.t_us;
   s_have_prev = true;
+  if (s_sample_cb) s_sample_cb(r);
+  if (s_state != RS_IDLE && s_state != RS_RECORDING) return;
 
   if (s_state == RS_IDLE) {
     if (start_hit) {
@@ -525,6 +529,7 @@ uint32_t race_current_s(void) { return race_recording() ? s_n_samples / RACE_RAT
 uint32_t race_overflows(void) { return s_overflows; }
 uint32_t race_scan_ms(void) { return s_scan_ms; }
 void race_set_sim_flag(bool on) { s_sim = on; }
+void race_set_sample_cb(void (*cb)(const RaceSample&)) { s_sample_cb = cb; }
 void race_set_reset_at(uint32_t n) { s_reset_at = n; }
 
 void race_set_limit(uint32_t bytes) {

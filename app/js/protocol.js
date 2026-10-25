@@ -141,6 +141,12 @@ export class Device {
   setTime(unixS = Math.floor(Date.now() / 1000)) { return this.command(`TIME ${unixS}`); }
   live(on) { return this.command(`LIVE ${on ? 1 : 0}`); }
   vmaxReset() { return this.command('VMAX RESET'); }
+  /** Punkty driftu i montaż (protokół ≥ 3). */
+  driftReset() { return this.command('DRIFT RESET'); }
+  mount(axes, yawDeg) {
+    if (!axes) return this.command('MOUNT');
+    return this.command(`MOUNT ${axes.forward} ${axes.left} ${axes.up} ${(+yawDeg || 0).toFixed(1)}`);
+  }
   arm() { return this.command('ARM'); }
 
   /** Wyścigi (protokół ≥ 2): {races, state, used, size}. */

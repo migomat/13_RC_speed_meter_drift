@@ -28,6 +28,28 @@
    "brake_pct": -10.0,
    "afront_tau_s": 0.03,
    "zupt_lpf_tau_s": 0.1
+  },
+  "drift": {
+   "lpf_tau_s": 0.05,
+   "bias_tau_s": 1.0,
+   "v_tau_s": 0.15,
+   "vdot_tau_s": 0.3,
+   "steady_yaw_acc_dps2": 150.0,
+   "steady_s": 0.25,
+   "max_dt_s": 0.2,
+   "min_yaw_dps": 30.0,
+   "min_acc_g": 0.3,
+   "min_v_mps": 1.5,
+   "v_max_mps": 30.0,
+   "min_angle_deg": 15.0,
+   "spin_angle_deg": 80.0,
+   "spin_s": 0.25,
+   "chain_gap_s": 1.0,
+   "min_seg_s": 0.3,
+   "pts_per_m": 10.0,
+   "pts_per_m_deg": 1.0,
+   "max_mult": 10,
+   "spin_loses_chain": 1
   }
  },
  "metrics": {

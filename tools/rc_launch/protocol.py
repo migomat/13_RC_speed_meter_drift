@@ -249,6 +249,17 @@ class Device:
     def set_time(self, unix_s: int | None = None):
         return self.command(f"TIME {int(unix_s if unix_s is not None else time.time())}")
 
+    def drift_reset(self):
+        """Zerowanie punktów driftu (protokół ≥ 3)."""
+        return self.command("DRIFT RESET")
+
+    def mount(self, imu_axes: dict | None = None, yaw_offset_deg: float = 0.0):
+        """Montaż płytki (protokół ≥ 3): bez argumentów – odczyt; wynik kalibracji → Xiao (do wyłączenia)."""
+        if imu_axes is None:
+            return self.command("MOUNT")
+        return self.command(f"MOUNT {imu_axes['forward']} {imu_axes['left']} {imu_axes['up']} "
+                            f"{yaw_offset_deg:.1f}")
+
     def list_races(self):
         """Wyścigi (protokół ≥ 2): lista i stan obszaru."""
         return self.command("RLIST")

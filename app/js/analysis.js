@@ -2,6 +2,10 @@
 // Każda zmiana algorytmu: jednocześnie tutaj i w analyze.py + wektory testowe.
 
 import { DEFAULT_EST_PARAMS, estInit, estStep } from './estimator.js';
+import { DEFAULT_DRIFT } from './drift.js';
+import { mapAxes } from './axes.js';
+
+export { mapAxes };
 
 const G = 9.80665;
 
@@ -19,6 +23,7 @@ export const DEFAULT_SETTINGS = {
   race_track_points: 200, // punkty toru (przepróbkowanie okrążeń po drodze)
   race_track_v_lowpass_hz: 2, // [Hz] wygładzanie prędkości z licznika zboczy (mapa toru)
   estimator: { ...DEFAULT_EST_PARAMS },
+  drift: { ...DEFAULT_DRIFT },
 };
 
 // Zmienione wartości domyślne: zapisane ustawienie równe staremu domyślnemu → nowe.
@@ -120,22 +125,7 @@ export function firstCrossing(t, y, level, iFrom = 0) {
   return NaN;
 }
 
-// ------------------------------------------------------------------ osie
-function parseAxis(spec) {
-  spec = String(spec).trim().toLowerCase();
-  return { idx: 'xyz'.indexOf(spec[spec.length - 1]), sign: spec.startsWith('-') ? -1 : 1 };
-}
-
-function mapAxes(bx, by, bz, axes) {
-  const board = [bx, by, bz];
-  return ['forward', 'left', 'up'].map((name) => {
-    const { idx, sign } = parseAxis(axes[name]);
-    const src = board[idx];
-    const out = new Float64Array(src.length);
-    for (let i = 0; i < src.length; i++) out[i] = src[i] * sign;
-    return out;
-  });
-}
+// osie płytki → osie auta: axes.js (wspólne z drift.js)
 
 // ------------------------------------------------------------------ v_front
 export function vFrontFromPeriods(period, mPerRev) {

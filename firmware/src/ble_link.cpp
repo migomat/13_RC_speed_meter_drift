@@ -27,7 +27,8 @@ static volatile uint16_t s_conn = BLE_CONN_HANDLE_INVALID;
 #define RX_RING 512
 static volatile uint8_t  s_rx[RX_RING];
 static volatile uint16_t s_rx_head, s_rx_tail;
-static bool s_vmax_reset;
+static bool s_vmax_reset, s_drift_reset, s_mount_changed;
+static bool s_phy_fast;   // żądane PHY 2M (pobieranie)
 static volatile uint16_t s_mtu = 23;
 
 static void rxd_cb(uint16_t conn, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
@@ -54,7 +55,8 @@ static void connect_cb(uint16_t conn) {
   BLEConnection* c = Bluefruit.Connection(conn);
   if (c) {
     s_mtu = clamp_mtu(c->getMtu());
-    c->requestPHY(BLE_PHY_2M ? BLE_GAP_PHY_2MBPS : BLE_GAP_PHY_1MBPS);
+    s_phy_fast = false;
+    c->requestPHY(BLE_GAP_PHY_1MBPS);   // zasięg; 2M dopiero przy pobieraniu
     c->requestDataLengthUpdate();
     c->requestMtuExchange(BLE_MTU);
     c->requestConnectionParameter(6);  // 7,5 ms
@@ -105,6 +107,58 @@ bool vmax_reset_requested(void) {
   bool r = s_vmax_reset;
   s_vmax_reset = false;
   return r;
+}
+
+bool mount_changed(void) {
+  bool r = s_mount_changed;
+  s_mount_changed = false;
+  return r;
+}
+
+bool drift_reset_requested(void) {
+  bool r = s_drift_reset;
+  s_drift_reset = false;
+  return r;
+}
+
+// PHY 2M przy pobieraniu (szybciej), 1M przy LIVE (ok. 3 dB lepsza czułość = zasięg)
+static void set_phy(bool fast) {
+#if BLE_PHY_2M_DOWNLOAD
+  if (fast == s_phy_fast || !ble_connected()) return;
+  BLEConnection* c = Bluefruit.Connection(s_conn);
+  if (!c) return;
+  s_phy_fast = fast;
+  c->requestPHY(fast ? BLE_GAP_PHY_2MBPS : BLE_GAP_PHY_1MBPS);
+#else
+  (void)fast;
+#endif
+}
+
+static const char AXIS_CH[] = "xyz";
+
+static void mount_str(char* b, size_t n) {
+  snprintf(b, n, "\"mount\":[\"%c%c\",\"%c%c\",\"%c%c\",%.1f]",
+           g_mount.sign[0] > 0 ? '+' : '-', AXIS_CH[g_mount.idx[0]],
+           g_mount.sign[1] > 0 ? '+' : '-', AXIS_CH[g_mount.idx[1]],
+           g_mount.sign[2] > 0 ? '+' : '-', AXIS_CH[g_mount.idx[2]], g_mount.yaw_deg);
+}
+
+// MOUNT <forward> <left> <up> <yaw_deg>, np. MOUNT +y -x +z -18.5
+static bool parse_mount(char** argv, Mount* m) {
+  for (int k = 0; k < 3; k++) {
+    const char* a = argv[k];
+    if ((a[0] != '+' && a[0] != '-') || !a[1] || a[2]) return false;
+    const char* p = strchr(AXIS_CH, a[1]);
+    if (!p) return false;
+    m->idx[k] = (int)(p - AXIS_CH);
+    m->sign[k] = a[0] == '+' ? 1 : -1;
+  }
+  if (m->idx[0] == m->idx[1] || m->idx[0] == m->idx[2] || m->idx[1] == m->idx[2]) return false;
+  // układ prawoskrętny: forward × left = up
+  int cyc = (m->idx[1] - m->idx[0] + 3) % 3 == 1 ? 1 : -1;
+  if (cyc * m->sign[0] * m->sign[1] != m->sign[2]) return false;
+  m->yaw_deg = (float)atof(argv[3]);
+  return m->yaw_deg >= -180.0f && m->yaw_deg <= 180.0f;
 }
 
 // ------------------------------------------------------------ łącza
@@ -208,12 +262,16 @@ static void cmd_info(Link& l) {
            "{\"fw\":\"%s\",\"format\":%d,\"proto\":%d,\"hall_lines\":%d,\"pole_pairs\":%d,"
            "\"edges_per_rev\":%d,\"slot_size\":%lu,\"slots\":%d,\"sample_rate\":%d,"
            "\"get_block_max\":%d,\"max_samples\":%d,\"max_edges\":%lu,\"jedec\":\"%06lX\","
-           "\"name\":\"%s\",\"race_rate\":%d,\"race_area\":%lu,\"race_sample_size\":%u}",
+           "\"name\":\"%s\",\"race_rate\":%d,\"race_area\":%lu,\"race_sample_size\":%u,"
+           "\"drift\":1,\"gyro_range\":%d,",
            FW_VERSION_STR, RUN_FORMAT_VERSION, PROTOCOL_VERSION, HALL_LINES, MOTOR_POLE_PAIRS,
            EDGES_PER_REV, (unsigned long)FLASH_SLOT_SIZE, FLASH_NUM_SLOTS, SAMPLE_RATE_HZ,
            GET_BLOCK_MAX, MAX_SAMPLES, (unsigned long)EDGE_LOG_LEN,
            (unsigned long)flash_jedec_id(), BLE_NAME, RACE_RATE_HZ, (unsigned long)RACE_AREA_SIZE,
-           (unsigned)sizeof(RaceSample));
+           (unsigned)sizeof(RaceSample), IMU_GYRO_RANGE_DPS);
+  size_t n = strlen(s_out);
+  mount_str(s_out + n, sizeof(s_out) - n - 2);
+  strcat(s_out, "}");
   send_text(l, s_out);
 }
 
@@ -287,6 +345,7 @@ static void cmd_get(Link& l, uint32_t seq, uint32_t off, uint32_t len, bool race
   static uint8_t frame[sizeof(BlockHeader) + GET_BLOCK_MAX] __attribute__((aligned(4)));
   if (logger_busy()) return send_err(l, "BUSY");
   if (len == 0 || len > GET_BLOCK_MAX) return send_err(l, "BAD_LEN");
+  if (l.is_ble) set_phy(true);
   uint8_t* data = frame + sizeof(BlockHeader);
   bool ok;
   uint32_t total;
@@ -374,10 +433,16 @@ static void send_live(Link& l) {
   snprintf(s_out, sizeof(s_out),
            "{\"live\":1,\"v\":%.3f,\"v_max\":%.3f,\"v_front\":%.3f,\"slip\":%d,\"rpm\":%.0f,"
            "\"thr\":%u,\"thr_pct\":%.1f,\"ax\":%.3f,\"zupt\":%d,\"state\":\"%s\",\"race\":\"%s\","
-           "\"race_s\":%lu}",
+           "\"race_s\":%lu,\"d_pts\":%.0f,\"d_mult\":%d,\"d_total\":%.0f,\"d_last\":%.0f,"
+           "\"d_best\":%.0f,\"d_ang\":%.1f,\"d_on\":%d,\"d_chain\":%d,\"d_banks\":%lu,"
+           "\"d_lost\":%lu,\"d_trans\":%lu}",
            g_live.v, g_live.v_max, g_live.v_front, g_live.spinning ? 1 : 0, g_live.rpm,
            g_live.throttle_us, g_live.throttle_pct, g_live.ax_g, g_live.zupt ? 1 : 0,
-           logger_state_name(), race_state_name(), (unsigned long)race_current_s());
+           logger_state_name(), race_state_name(), (unsigned long)race_current_s(),
+           g_live.d_pts, g_live.d_mult, g_live.d_total, g_live.d_last, g_live.d_best,
+           g_live.d_angle, g_live.d_on ? 1 : 0, g_live.d_chain ? 1 : 0,
+           (unsigned long)g_live.d_banks, (unsigned long)g_live.d_lost,
+           (unsigned long)g_live.d_trans);
   if (!l.is_ble) return send_text(l, s_out);
   size_t n = strlen(s_out);
   if (n + 1 >= sizeof(s_out)) return;
@@ -416,7 +481,24 @@ static void handle_line(Link& l, char* line) {
   }
   if (!strcmp(c, "LIVE") && argc >= 2) {
     l.live = U(1) != 0;
+    if (l.is_ble && l.live) set_phy(false);
     return send_text(l, "OK");
+  }
+  if (!strcmp(c, "DRIFT") && argc >= 2 && !strcmp(argv[1], "RESET")) {
+    s_drift_reset = true;
+    return send_text(l, "OK");
+  }
+  if (!strcmp(c, "MOUNT")) {
+    if (argc >= 5) {
+      Mount m;
+      if (!parse_mount(argv + 1, &m)) return send_err(l, "BAD_MOUNT");
+      if (memcmp(&m, &g_mount, sizeof(m)) != 0) s_mount_changed = true;
+      g_mount = m;
+    }
+    s_out[0] = '{';
+    mount_str(s_out + 1, sizeof(s_out) - 3);
+    strcat(s_out, "}");
+    return send_text(l, s_out);
   }
   if (!strcmp(c, "VMAX") && argc >= 2 && !strcmp(argv[1], "RESET")) {
     s_vmax_reset = true;

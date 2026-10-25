@@ -8,8 +8,9 @@ import { analyze, analyzeRace, mergeSettings, DEFAULT_SETTINGS, METRIC_LABELS, R
 import * as db from './storage.js';
 import { syncedCharts, scatterChart, trackMap, PALETTE } from './charts.js';
 import { GitHubStore, syncAll } from './sync.js';
+import { driftScore, mountCalibrate, DRIFT_SUMMARY_LABELS } from './drift.js';
 
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 const $ = (id) => document.getElementById(id);
 const fmt = (v, d = 2) => (v == null || Number.isNaN(v) ? '–' : v.toFixed(d).replace('.', ','));
 
@@ -27,6 +28,9 @@ const state = {
   sync: null,                  // {repo, token, auto} – tylko na tym urządzeniu (kv 'sync')
   syncing: false,
   lastStatus: null,
+  info: null,                  // INFO z urządzenia (proto, montaż)
+  driftPrev: null,             // poprzednie liczniki driftu z LIVE (zdarzenia)
+  calib: null,                 // wynik kalibracji montażu do zastosowania
   live: { on: false, last: 0, data: null },
   speedUnit: 'kmh',
   currentRun: null,
@@ -84,8 +88,10 @@ function armedButton(btn, label, action) {
 
 // ------------------------------------------------------------------ nawigacja
 let currentView = 'connect';
+const LIVE_VIEWS = ['speed', 'drift'];
 function goto(view) {
-  if (currentView === 'speed' && view !== 'speed') leaveSpeed();
+  const wasLive = LIVE_VIEWS.includes(currentView);
+  if (wasLive && !LIVE_VIEWS.includes(view)) leaveSpeed();
   currentView = view;
   document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${view}`));
   document.querySelectorAll('nav.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.view === view ||
@@ -94,7 +100,8 @@ function goto(view) {
   if (view === 'runs') renderRunsList();
   if (view === 'races') renderRacesList();
   if (view === 'compare') renderCompare();
-  if (view === 'speed') enterSpeed();
+  if (LIVE_VIEWS.includes(view) && !wasLive) enterSpeed();
+  if (view === 'drift' && state.live.data) renderDrift(state.live.data);
   if (view === 'settings') renderSettings();
 }
 
@@ -118,7 +125,8 @@ async function connect(kind, opts = {}) {
     $('connInfo').textContent = state.demo ? 'Tryb demo – wirtualne Xiao z syntetycznymi startami.' : `Połączono z ${tr.name}.`;
     await state.device.setTime();
     await refreshDevice();
-    if (currentView === 'speed') enterSpeed();
+    await sendMount();
+    if (LIVE_VIEWS.includes(currentView)) enterSpeed();
   } catch (e) {
     setChip('rozłączony', 'off');
     const msg = kind === 'demo' ? `Demo: ${e.message}` : bleErrorMessage(e);
@@ -156,6 +164,7 @@ async function refreshDevice() {
   if (!d) return;
   const [info, st, runs] = [await d.info(), await d.status(), await d.list()];
   state.lastStatus = st;
+  state.info = info;
   state.raceInfo = (info.proto || 1) >= 2 ? await d.rlist() : null;
   renderRaceDev(state.raceInfo);
   const racesNew = state.raceInfo ? state.raceInfo.races.filter((r) => !r.read).length : 0;
@@ -402,7 +411,53 @@ function onLive(m) {
       .map(([k, v]) => `<span class="muted">${k}</span><b>${v}</b>`).join('');
   }
   if (currentView === 'speed') renderSpeed(m);
+  if (currentView === 'drift') renderDrift(m);
 }
+
+// Montaż płytki z ustawień → Xiao (protokół ≥ 3; Xiao pamięta go do wyłączenia zasilania)
+async function sendMount() {
+  const d = state.device;
+  if (!d || !state.info || (state.info.proto || 1) < 3) return;
+  try { await d.mount(state.settings.imu_axes, state.settings.estimator.yaw_offset_deg); } catch (e) { toast(`Montaż: ${e.message}`); }
+}
+
+const fmtPts = (v) => Math.round(v || 0).toLocaleString('pl-PL');
+
+let drEventTimer = null;
+function driftEvent(text, cls) {
+  const el = $('drEvent');
+  el.textContent = text;
+  el.className = `dr-event show ${cls}`;
+  clearTimeout(drEventTimer);
+  drEventTimer = setTimeout(() => { el.className = 'dr-event'; }, 1800);
+}
+
+function renderDrift(m) {
+  if (m.d_total === undefined) {
+    $('drHint').textContent = 'Firmware bez punktów za drift – wgraj wersję 1.2 (drift).';
+    return;
+  }
+  const p = state.driftPrev;
+  if (p) {
+    if (m.d_lost > p.d_lost) { driftEvent('OBRÓT – łańcuch stracony', 'bad'); vibrate([80, 60, 80]); }
+    else if (m.d_banks > p.d_banks) { driftEvent(`+${fmtPts(m.d_last)}`, 'good'); vibrate(40); }
+    else if (m.d_mult > p.d_mult) { driftEvent(`PRZEKŁADKA ×${m.d_mult}`, 'mult'); vibrate(30); }
+  }
+  state.driftPrev = { d_lost: m.d_lost, d_banks: m.d_banks, d_mult: m.d_mult };
+  $('drPts').textContent = fmtPts(m.d_pts);
+  $('drChainLbl').textContent = m.d_on ? 'DRIFT' : m.d_chain ? 'łańcuch trwa…' : 'łańcuch';
+  document.querySelector('.drift').classList.toggle('on', !!m.d_on);
+  $('drMult').textContent = `×${m.d_mult}`;
+  $('drTotal').textContent = fmtPts(m.d_total);
+  $('drBest').textContent = fmtPts(m.d_best);
+  $('drTrans').textContent = m.d_trans;
+  $('drLost').textContent = m.d_lost;
+  const a = Math.max(0, Math.min(90, m.d_ang || 0));
+  $('drAngle').textContent = `${Math.round(m.d_ang || 0)}°`;
+  $('drAngleBar').style.width = `${a / 90 * 100}%`;
+}
+
+function vibrate(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) { /* */ } }
 
 function mmss(s) {
   s = Math.max(0, Math.round(s || 0));
@@ -436,6 +491,8 @@ async function enterSpeed() {
     const stale = !state.device || performance.now() - state.live.last > 300;
     show($('spdNoSignal'), stale);
     document.querySelector('.speedo').classList.toggle('stale', stale);
+    show($('drNoSignal'), stale);
+    document.querySelector('.drift').classList.toggle('stale', stale);
   }, 100);
 }
 
@@ -607,6 +664,16 @@ async function shareOrDownload(name, text, mime) {
 }
 
 // ------------------------------------------------------------------ wyścigi
+function getRaceDrift(rec) {
+  const key = settingsKey();
+  const c = state.analysisCache.get('drift:' + rec.id);
+  if (c && c.key === key) return c.res;
+  const race = parseRace(new Uint8Array(rec.raw), { verifyCrc: false });
+  const res = driftScore(race, state.settings);
+  state.analysisCache.set('drift:' + rec.id, { key, res });
+  return res;
+}
+
 function getRaceAnalysis(rec) {
   const key = settingsKey();
   const c = state.analysisCache.get('race:' + rec.id);
@@ -637,8 +704,9 @@ async function renderRacesList() {
     return;
   }
   for (const rec of all) {
-    let m = {};
+    let m = {}, dr = null;
     try { m = getRaceAnalysis(rec).metrics; } catch (e) { m = {}; }
+    try { dr = getRaceDrift(rec).summary; } catch (e) { dr = null; }
     const b = document.createElement('button');
     b.className = 'item';
     b.innerHTML = `<div class="top"><b>${runDate(rec)}</b>${rec.tag ? `<span class="tag">${esc(rec.tag)}</span>` : ''}</div>
@@ -647,6 +715,7 @@ async function renderRacesList() {
       <span>droga <b>${raceMetricValue('distance_m', m.distance_m)}</b> m</span>
       <span>v maks. <b>${fmt(speedConv(m.v_front_max), 1)}</b> ${state.speedUnit === 'kmh' ? 'km/h' : 'm/s'}</span>
       <span>obroty <b>${raceMetricValue('rpm_max', m.rpm_max)}</b> rpm</span>
+      ${dr ? `<span>drift <b>${fmtPts(dr.total)}</b> pkt</span>` : ''}
       <span class="muted">seq ${rec.seq}</span></div>`;
     b.onclick = () => openRace(rec.id);
     list.appendChild(b);
@@ -671,6 +740,11 @@ async function openRace(id) {
   $('raceNote').value = rec.note || '';
   if (state.raceCharts) state.raceCharts.destroy();
   const s = res.series;
+  const dr = getRaceDrift(rec);
+  renderRaceDrift(dr);
+  state.calib = null;
+  show($('raceCalibApply'), false);
+  $('raceCalibMsg').textContent = '';
   const v = Float64Array.from(s.v_front, (x) => speedConv(x));
   state.raceCharts = syncedCharts($('raceCharts'), s.t, [
     { label: 'gaz', unit: '%', height: 100, series: [{ label: 'gaz', values: s.throttle_pct, color: PALETTE[4] }] },
@@ -680,6 +754,10 @@ async function openRace(id) {
       { label: 'a_long', values: s.a_long, color: PALETTE[0], width: 2 },
       { label: 'a_lat', values: s.a_lat, color: PALETTE[2] }] },
     { label: 'skręt', unit: '°/s', height: 130, series: [{ label: 'prędkość skrętu', values: s.yaw_rate, color: PALETTE[3] }] },
+    { label: 'kąt driftu', unit: '°', height: 130, series: [{ label: 'kąt', values: dr.series.angle, color: PALETTE[6 % PALETTE.length] }] },
+    { label: 'punkty', unit: 'pkt', height: 130, series: [
+      { label: 'łańcuch', values: dr.series.pts, color: PALETTE[2] },
+      { label: 'suma', values: dr.series.total, color: PALETTE[0], width: 2 }] },
   ], { syncKey: 'race' });
   setRaceRange('all');
   state.raceLap = -1;
@@ -689,6 +767,51 @@ async function openRace(id) {
     if (k === 'v_front_max' || k === 'v_front_avg') { val = fmt(speedConv(res.metrics[k]), 1); u = state.speedUnit === 'kmh' ? 'km/h' : 'm/s'; }
     return `<div class="metric"><div class="l">${label}</div><div class="v">${val} <span class="small muted">${u}</span></div></div>`;
   }).join('');
+}
+
+function renderRaceDrift(dr) {
+  $('raceDrift').innerHTML = Object.entries(DRIFT_SUMMARY_LABELS).map(([k, [label, unit]]) => {
+    const v = dr.summary[k];
+    const val = k === 'drift_time_s' || k === 'angle_max_deg' ? fmt(v, 1) : fmtPts(v);
+    return `<div class="metric"><div class="l">${label}</div><div class="v">${val} <span class="small muted">${unit}</span></div></div>`;
+  }).join('');
+}
+
+function calibrateFromRace() {
+  const rec = state.currentRace;
+  if (!rec) return;
+  try {
+    const cal = mountCalibrate(parseRace(new Uint8Array(rec.raw), { verifyCrc: false }));
+    state.calib = cal;
+    const ax = cal.imu_axes;
+    const cur = state.settings.imu_axes;
+    const same = ax.forward === cur.forward && ax.left === cur.left && ax.up === cur.up &&
+      Math.abs(cal.yaw_offset_deg - state.settings.estimator.yaw_offset_deg) < 2;
+    $('raceCalibMsg').innerHTML = `Do przodu <b>${ax.forward}</b>, w lewo <b>${ax.left}</b>, w górę <b>${ax.up}</b>, ` +
+      `kąt w poziomie <b>${fmt(cal.yaw_offset_deg, 1)}°</b> (z ${cal.samples} próbek w zakrętach, rozrzut ${fmt(cal.spread_deg, 0)}°).` +
+      (cal.spread_deg > 35 ? ' <span class="warn">Duży rozrzut – nagranie z poślizgami albo za wolna jazda; wynik niepewny.</span>' : '') +
+      (same ? ' Tak jak w ustawieniach.' : '');
+    show($('raceCalibApply'), !same);
+  } catch (e) {
+    state.calib = null;
+    $('raceCalibMsg').textContent = e.message;
+    show($('raceCalibApply'), false);
+  }
+}
+
+async function applyCalibration() {
+  const cal = state.calib;
+  if (!cal) return;
+  const s = mergeSettings(state.settings);
+  s.imu_axes = { ...cal.imu_axes };
+  s.estimator.yaw_offset_deg = Math.round(cal.yaw_offset_deg * 10) / 10;
+  state.settings = s;
+  state.analysisCache.clear();
+  await db.kvSet('settings', s);
+  await sendMount();
+  show($('raceCalibApply'), false);
+  toast(state.device && (state.info?.proto || 1) >= 3 ? 'Montaż zapisany i wysłany do Xiao' : 'Montaż zapisany – trafi do Xiao po połączeniu');
+  if (state.currentRace) openRace(state.currentRace.id);
 }
 
 // Mapa toru + tabela okrążeń; dotknięcie wiersza = to okrążenie na mapie i na wykresach
@@ -828,6 +951,12 @@ async function renderCompare() {
 
 // ------------------------------------------------------------------ ustawienia
 const AXES = ['+x', '-x', '+y', '-y', '+z', '-z'];
+const DRIFT_FIELDS = [
+  ['pts_per_m', 'Punkty za metr driftu'], ['pts_per_m_deg', 'Punkty za metr × stopień kąta'],
+  ['min_angle_deg', 'Kąt od którego liczy się drift [°]'], ['chain_gap_s', 'Przerwa kończąca łańcuch [s]'],
+  ['max_mult', 'Maks. mnożnik'], ['min_acc_g', 'Min. przyspieszenie boczne [g]'], ['min_v_mps', 'Min. prędkość [m/s]'],
+  ['spin_angle_deg', 'Kąt obrotu (utrata) [°]'],
+];
 const EST_FIELDS = [
   ['yaw_offset_deg', 'Kąt montażu w poziomie [°]'], ['zupt_ms', 'ZUPT – czas bezruchu [ms]'],
   ['zupt_gyro_dps', 'ZUPT – maks. ω [dps]'], ['zupt_acc_g', 'ZUPT – maks. ||a|−1| [g]'],
@@ -849,9 +978,13 @@ function renderSettings() {
   $('setLp').value = s.lowpass_hz;
   $('setVmin').value = s.v_min_mps;
   $('setRaceLp').value = s.race_lowpass_hz;
+  $('setDrift').innerHTML = DRIFT_FIELDS.map(([k, l]) => `<label>${l}<input data-drift="${k}" type="number" step="any" inputmode="decimal" value="${s.drift[k]}"></label>`).join('');
+  $('setDriftSpin').checked = !!s.drift.spin_loses_chain;
+  $('setMount').textContent = `Montaż płytki: do przodu ${s.imu_axes.forward}, w lewo ${s.imu_axes.left}, w górę ${s.imu_axes.up}, ` +
+    `kąt ${fmt(s.estimator.yaw_offset_deg, 1)}° – kalibracja w szczegółach wyścigu (jazda bez driftu).`;
   $('setEst').innerHTML = EST_FIELDS.map(([k, l]) => `<label>${l}<input data-est="${k}" type="number" step="any" inputmode="decimal" value="${s.estimator[k]}"></label>`).join('');
   $('setTheme').value = localStorage.getItem('x4f_theme') || 'auto';
-  $('appVersion').textContent = `X4F Launch Logger ${APP_VERSION} · analiza zgodna z tools/rc_launch/analyze.py`;
+  $('appVersion').textContent = `X4F Drift Logger ${APP_VERSION} · analiza zgodna z tools/rc_launch/analyze.py i drift.py`;
 }
 
 async function saveSettings() {
@@ -864,13 +997,18 @@ async function saveSettings() {
   s.v_min_mps = num('setVmin');
   s.race_lowpass_hz = num('setRaceLp');
   document.querySelectorAll('[data-est]').forEach((el) => { s.estimator[el.dataset.est] = parseFloat(el.value); });
+  document.querySelectorAll('[data-drift]').forEach((el) => { s.drift[el.dataset.drift] = parseFloat(el.value); });
+  s.drift.spin_loses_chain = $('setDriftSpin').checked ? 1 : 0;
+  if (DRIFT_FIELDS.some(([k]) => !(s.drift[k] >= 0))) { $('setMsg').textContent = 'Niepoprawne wartości punktów za drift.'; return; }
   const axesUsed = new Set(Object.values(s.imu_axes).map((a) => a[1]));
   if (axesUsed.size !== 3) { $('setMsg').textContent = 'Każda oś auta musi mieć inną oś płytki.'; return; }
   if (!(s.final_drive_ratio > 0 && s.front_tire_diameter_mm > 0 && s.lowpass_hz > 0 && s.race_lowpass_hz > 0)) { $('setMsg').textContent = 'Niepoprawne wartości.'; return; }
   state.settings = s;
   state.analysisCache.clear();
   await db.kvSet('settings', s);
+  await sendMount();
   $('setMsg').textContent = 'Zapisano – wszystkie starty zostaną przeliczone.';
+  toast('Zapisano ustawienia');
 }
 
 function applyTheme(t) {
@@ -1023,6 +1161,14 @@ async function init() {
     if (state.device) { await state.device.vmaxReset(); toast('Wyzerowano prędkość i obroty maksymalne'); }
   };
 
+  $('drReset').onclick = async () => {
+    if (!state.device) return;
+    try { await state.device.driftReset(); state.driftPrev = null; toast('Wyzerowano punkty'); } catch (e) { toast(e.message); }
+  };
+  $('raceCalib').onclick = () => calibrateFromRace();
+  $('raceCalibApply').onclick = () => applyCalibration();
+  $('setDriftSave').onclick = () => saveSettings();
+
   $('runsFilter').onchange = () => renderRunsList();
   $('runBack').onclick = () => goto('runs');
   document.querySelectorAll('[data-range]').forEach((b) => { b.onclick = () => setRunRange(b.dataset.range); });
@@ -1087,7 +1233,7 @@ async function init() {
     try { show($('btnReconnect'), localStorage.getItem('x4f_paired') === '1'); } catch (e) { /* */ }
   }
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && (currentView === 'speed' || state.downloading)) wakeLock(true);
+    if (document.visibilityState === 'visible' && (LIVE_VIEWS.includes(currentView) || state.downloading)) wakeLock(true);
   });
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     // Nowa wersja aplikacji przejęła stronę → jednorazowe przeładowanie (nie w trakcie pobierania)

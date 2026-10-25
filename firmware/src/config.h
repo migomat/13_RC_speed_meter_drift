@@ -6,9 +6,9 @@
 #include <stdint.h>
 
 #define FW_VERSION_MAJOR    1
-#define FW_VERSION_MINOR    1
+#define FW_VERSION_MINOR    2
 #define FW_VERSION_PATCH    0
-#define FW_VERSION_STR      "1.1.0"
+#define FW_VERSION_STR      "1.2.0"
 
 // ---------------------------------------------------------------- hall
 // Tryb czujnika halla: 1 (tylko linia A) albo 3 (A/B/C).
@@ -81,7 +81,7 @@
 
 // ---------------------------------------------------------------- IMU
 #define IMU_ACCEL_RANGE_G   4       // ±4 g
-#define IMU_GYRO_RANGE_DPS  500     // ±500 dps
+#define IMU_GYRO_RANGE_DPS  1000    // ±1000 dps (drift: przekładki i obroty przekraczają 500 dps)
 #define IMU_ODR_HZ          833
 #define IMU_I2C_ADDR        0x6A    // LSM6DS3TR-C na Wire1 (SA0 = 0)
 #define IMU_I2C_HZ          400000  // TWIM1: 400 kHz to maksimum nRF52840 (informacyjnie)
@@ -100,7 +100,8 @@
 // kasowanie tylko w całości komendą RERASE z aplikacji, pełna pamięć = stop.
 #define RACE_AREA_ADDR      (FLASH_NUM_SLOTS * FLASH_SLOT_SIZE)
 #define RACE_AREA_SIZE      (FLASH_TOTAL_SIZE - RACE_AREA_ADDR)   // 1 MB
-#define RACE_RATE_HZ        50      // [Hz] próbka = średnia z SAMPLE_RATE_HZ / RACE_RATE_HZ taktów
+#define RACE_RATE_HZ        20      // [Hz] próbka = średnia z SAMPLE_RATE_HZ / RACE_RATE_HZ taktów
+                                    // (20 Hz: 1 MB ≈ 43 min; z tych próbek liczone są też punkty driftu)
 #define RACE_DECIM          (SAMPLE_RATE_HZ / RACE_RATE_HZ)
 #define RACE_PRETRIGGER_MS  1000    // [ms] zapis sprzed pierwszego gazu
 #define RACE_START_PCT      30      // [% do przodu] gaz rozpoczynający wyścig
@@ -108,7 +109,7 @@
 // Dłużej niż typowe czekanie na sędziego po wywrotce – krótsza przerwa nie dzieli wyścigu.
 #define RACE_END_IDLE_S     30
 #define RACE_PERIOD_UNIT_US 4       // [us] rozdzielczość okresu obrotu w próbce (uint16 → maks. 262 ms)
-#define RACE_BUF_BYTES      8192    // [B] bufor RAM przed zapisem do flash (8 s przy 50 Hz)
+#define RACE_BUF_BYTES      8192    // [B] bufor RAM przed zapisem do flash (20 s przy 20 Hz)
 #define RACE_MAX_RECORDS    32      // maks. wyścigów w obszarze
 
 // ---------------------------------------------------------------- prędkościomierz
@@ -123,6 +124,8 @@
 #define IMU_AXIS_UP             2
 #define IMU_SIGN_UP             (+1)
 #define IMU_YAW_OFFSET_DEG      0.0f    // [deg] kąt montażu płytki w poziomie
+// Osie i kąt montażu można zmienić w działaniu komendą MOUNT (aplikacja wysyła wynik
+// kalibracji po połączeniu); wartości tutaj obowiązują po włączeniu zasilania.
 #define ZUPT_MS                 200     // [ms] czas bezruchu do zerowania
 #define ZUPT_GYRO_DPS           4.0f    // [dps] maks. |ω| (po odjęciu biasu) w bezruchu
 #define ZUPT_ACC_G              0.06f   // [g] maks. ||a|_f − 1 g| w bezruchu (po filtrze)
@@ -135,16 +138,43 @@
 #define EST_AFRONT_TAU_S        0.03f   // [s] wygładzanie a_front / a_long w estymatorze
 #define LIVE_RATE_HZ            20
 
+// ---------------------------------------------------------------- drift
+// Punkty za drift (drift.c) – te same nazwy i wartości co tools/rc_launch/drift.py
+// (DEFAULT_DRIFT), tools/config.yaml (drift:) i ustawienia aplikacji.
+#define DRIFT_LPF_TAU_S             0.05f   // [s] filtr przyspieszeń i ω
+#define DRIFT_BIAS_TAU_S            1.0f    // [s] uśrednianie biasu w postoju
+#define DRIFT_V_TAU_S               0.15f   // [s] filtr prędkości z promienia skrętu
+#define DRIFT_VDOT_TAU_S            0.3f    // [s] filtr przyspieszenia stycznego
+#define DRIFT_STEADY_YAW_ACC_DPS2   150.0f  // [dps/s] powyżej – przyspieszenie styczne nieznane
+#define DRIFT_STEADY_S              0.25f   // [s] po wejściu w łuk – przyspieszenie styczne nieznane
+#define DRIFT_MAX_DT_S              0.2f    // [s] ograniczenie kroku
+#define DRIFT_MIN_YAW_DPS           30.0f   // [dps] poniżej – jazda prosto
+#define DRIFT_MIN_ACC_G             0.3f    // [g] poniżej – kąt nieokreślony
+#define DRIFT_MIN_V_MPS             1.5f    // [m/s]
+#define DRIFT_V_MAX_MPS             30.0f   // [m/s]
+#define DRIFT_MIN_ANGLE_DEG         15.0f   // [deg] kąt, od którego liczy się drift
+#define DRIFT_SPIN_ANGLE_DEG        80.0f   // [deg] powyżej przez DRIFT_SPIN_S = obrót
+#define DRIFT_SPIN_S                0.25f   // [s]
+#define DRIFT_CHAIN_GAP_S           1.0f    // [s] przerwa, po której łańcuch jest zaliczany
+#define DRIFT_MIN_SEG_S             0.3f    // [s] minimalny segment (przekładka)
+#define DRIFT_PTS_PER_M             10.0f   // punkty za metr driftu
+#define DRIFT_PTS_PER_M_DEG         1.0f    // punkty za metr × stopień kąta
+#define DRIFT_MAX_MULT              10      // maks. mnożnik
+#define DRIFT_SPIN_LOSES_CHAIN      1       // 1 = obrót kasuje łańcuch, 0 = zalicza
+
 // ---------------------------------------------------------------- BLE
 #define BLE_NAME            "X4F-LOG"
 #define BLE_MTU             247
 #define BLE_TX_POWER_DBM    8       // [dBm] maks. dla nRF52840 (zasięg w aucie)
-#define BLE_PHY_2M          1       // 1 = PHY 2M (szybsze pobieranie), 0 = 1M (ok. 3 dB lepszy zasięg)
+// PHY 1M ma ok. 3 dB lepszą czułość niż 2M (zasięg na torze). 2M tylko na czas pobierania
+// (GET/RGET), powrót do 1M przy LIVE 1. 0 = zawsze 1M.
+#define BLE_PHY_2M_DOWNLOAD 1
 
 // ---------------------------------------------------------------- format
 #define RUN_FORMAT_VERSION  1
 #define RACE_FORMAT_VERSION 1
-#define PROTOCOL_VERSION    2       // 2: komendy wyścigów RLIST/RGET/RDEL/RERASE/RSTOP
+#define PROTOCOL_VERSION    3       // 2: komendy wyścigów RLIST/RGET/RDEL/RERASE/RSTOP
+                                    // 3: punkty driftu w LIVE, DRIFT RESET, MOUNT
 
 // ---------------------------------------------------------------- debug
 // Komendy SIM_* (syntetyczne zbocza/gaz) dostępne tylko przez USB.

@@ -245,7 +245,7 @@ ISR krótka: bez obliczeń zmiennoprzecinkowych i bez `Serial`.
 
 ### IMU
 
-- Akcelerometr ±4 g, żyroskop ±500 dps, ODR 833 Hz, filtry wbudowane LSM6DS3
+- Akcelerometr ±4 g, żyroskop ±500 dps (wersja drift: ±1000), ODR 833 Hz, filtry wbudowane LSM6DS3
   ustawione rozsądnie (anty-aliasing).
 - Odczyt próbek z FIFO lub w pętli z kontrolą, żeby nie gubić próbek.
 - Zapis surowych wartości int16 (konwersja na jednostki po stronie aplikacji,
@@ -655,7 +655,7 @@ Drugi tryb pracy obok startów: **ciągły zapis całego wyścigu** (np. 6 min) 
 połowy flash. Szczegóły formatu: `docs/FORMAT.md`, komendy: `docs/PROTOCOL.md`, opis: `README.md`.
 
 - Flash: 8 slotów startów (1 MB) + obszar wyścigów 1 MB (`RACE_AREA_*`).
-- Próbka `RACE_RATE_HZ` = 50 Hz (20 B, średnia z taktów 500 Hz). Wyścig zaczyna się sam
+- Próbka `RACE_RATE_HZ` = 20 Hz (fw 1.2; fw 1.1: 50 Hz) (20 B, średnia z taktów 500 Hz). Wyścig zaczyna się sam
   (gaz > `RACE_START_PCT`, 1 s pre-trigger), kończy po `RACE_END_IDLE_S` postoju.
 - **Bez nadpisywania:** pełna pamięć = stop nagrywania wyścigów do skasowania z aplikacji.
   Kasowanie tylko w całości (`RERASE`) i tylko gdy wszystkie wyścigi pobrane (`RDEL` po zapisie
@@ -664,6 +664,19 @@ połowy flash. Szczegóły formatu: `docs/FORMAT.md`, komendy: `docs/PROTOCOL.md
 - Analiza: `analyze_race` (Python) = `analyzeRace` (JS), wspólne wektory `test_vectors/race_*`.
 - Okrążenia i mapa toru: `race_laps` / `raceLaps` – granice co 360° kursu z żyroskopu, pozycja
   z drogi kół, tor = średnia dopasowanych okrążeń (opis w README). Wektory zawierają okrążenia i tor.
+
+## Punkty za drift (fw 1.2, aplikacja 1.4 – projekt 13_RC_speed_meter_drift)
+
+Zakładka *Drift*: punkty łańcucha (góra), mnożnik (środek), suma (dół). Liczy Xiao (`drift.c`)
+z próbek wyścigu 20 Hz i wysyła w `LIVE` (`d_*`); aplikacja tylko wyświetla. Opis: README.
+
+- Kąt driftu z kierunku przyspieszenia poziomego w łuku, prędkość z promienia V = |a|/|ω| –
+  **nie z halla** (koła napędzane w drifcie buksują).
+- Ten sam algorytm w `firmware/src/drift.c`, `tools/rc_launch/drift.py` (referencja) i
+  `app/js/drift.js`; zmiana = wszystkie trzy + wektory `test_vectors/drift_*` (Python, JS
+  i test C `tools/drift_host`). Stałe: `DRIFT_*` = `config.yaml: drift` = ustawienia aplikacji.
+- Montaż płytki (osie + kąt w poziomie) decyduje o kącie driftu: kalibracja z nagrania jazdy bez
+  driftu (`mount_calibrate` / `mountCalibrate`), wysyłana do Xiao komendą `MOUNT` (protokół 3).
 
 ## Synchronizacja (aplikacja 1.3)
 

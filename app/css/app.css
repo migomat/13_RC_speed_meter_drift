@@ -139,3 +139,27 @@ nav.tabs button.active { color: var(--accent); font-weight: 600; }
 #raceLaps table tr.sel td { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 #raceLaps table tr.bad td { color: var(--muted); }
 #raceLaps table td.best { font-weight: 700; }
+
+/* Drift – punkty na żywo: łańcuch u góry, mnożnik na środku, suma na dole */
+.drift { background: var(--card); border-radius: 18px; border: 1px solid var(--border); padding: 2.6rem 1rem 1.2rem;
+  text-align: center; position: relative; display: flex; flex-direction: column; align-items: center; gap: .5rem;
+  min-height: calc(100dvh - var(--tab-h) - 7rem); justify-content: space-between; transition: border-color .2s; }
+.drift.on { border-color: var(--ok); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ok) 35%, transparent); }
+.drift .nosignal { inset: 0 0 auto 0; height: auto; padding: .4rem; font-size: 1.2rem; border-radius: 18px 18px 0 0; }
+.drift.stale .dr-chain, .drift.stale .dr-mult { opacity: .35; }
+.dr-chain { display: flex; flex-direction: column; align-items: center; }
+.dr-chain span { font-size: clamp(3.5rem, 20vw, 8rem); font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+.drift.on .dr-chain span { color: var(--ok); }
+.dr-chain small, .dr-total small { color: var(--muted); font-size: .9rem; text-transform: uppercase; letter-spacing: .08em; }
+.dr-mult { font-size: clamp(3rem, 18vw, 7rem); font-weight: 800; line-height: 1; color: var(--accent); font-variant-numeric: tabular-nums; }
+.dr-event { min-height: 2rem; font-size: 1.5rem; font-weight: 800; opacity: 0; transition: opacity .2s; }
+.dr-event.show { opacity: 1; }
+.dr-event.good { color: var(--ok); }
+.dr-event.bad { color: var(--bad); }
+.dr-event.mult { color: var(--accent); }
+.dr-angle { display: flex; align-items: center; gap: .6rem; width: min(100%, 420px); }
+.dr-bar { flex: 1; height: 12px; border-radius: 6px; background: var(--border); overflow: hidden; }
+.dr-bar span { display: block; height: 100%; width: 0; background: var(--accent); transition: width .1s linear; }
+.dr-angle b { min-width: 3.2rem; text-align: right; font-variant-numeric: tabular-nums; }
+.dr-total { display: flex; flex-direction: column; align-items: center; }
+.dr-total span { font-size: clamp(2.6rem, 14vw, 5.5rem); font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }

@@ -10,7 +10,7 @@ imu_axes:                    # mapowanie osi płytki na osie auta
 # = −ω wokół osi „left” (prawoskrętny układ forward/left/up).
 pitch_axis_gyro: "y"         # informacyjnie – oś płytki odpowiadająca „left”
 lowpass_hz: 25
-race_lowpass_hz: 5          # [Hz] filtr przyspieszeń w analizie wyścigu (próbki 50 Hz)
+race_lowpass_hz: 5          # [Hz] filtr przyspieszeń w analizie wyścigu (próbki 20–50 Hz)
 race_lap_dist_tol: 0.2       # okrążenie z drogą ±20 % od mediany = pominięte (buksowanie, uderzenie)
 race_track_points: 200       # punkty toru (przepróbkowanie okrążeń po drodze)
 race_track_v_lowpass_hz: 2   # [Hz] wygładzanie prędkości z licznika zboczy (mapa toru)
@@ -32,3 +32,25 @@ estimator:
   brake_pct: -10
   afront_tau_s: 0.03
   zupt_lpf_tau_s: 0.1     # [s] filtr |a|, |ω| przed progami ZUPT (drgania wentylatora ESC)
+# Punkty za drift (rc_launch/drift.py = firmware/src/drift.c = app/js/drift.js)
+drift:
+  lpf_tau_s: 0.05           # [s] filtr przyspieszeń i ω
+  bias_tau_s: 1.0           # [s] uśrednianie biasu w postoju
+  v_tau_s: 0.15             # [s] filtr prędkości z promienia skrętu
+  vdot_tau_s: 0.3           # [s] filtr przyspieszenia stycznego
+  steady_yaw_acc_dps2: 150  # [dps/s] powyżej – przyspieszenie styczne nieznane
+  steady_s: 0.25            # [s] po wejściu w łuk – przyspieszenie styczne nieznane
+  max_dt_s: 0.2             # [s] ograniczenie kroku
+  min_yaw_dps: 30           # [dps] poniżej – jazda prosto
+  min_acc_g: 0.3            # [g] poniżej – kąt nieokreślony
+  min_v_mps: 1.5            # [m/s]
+  v_max_mps: 30             # [m/s]
+  min_angle_deg: 15         # [deg] kąt, od którego liczy się drift
+  spin_angle_deg: 80        # [deg] powyżej przez spin_s = obrót
+  spin_s: 0.25              # [s]
+  chain_gap_s: 1.0          # [s] przerwa, po której łańcuch jest zaliczany
+  min_seg_s: 0.3            # [s] minimalny segment (przekładka)
+  pts_per_m: 10             # punkty za metr driftu
+  pts_per_m_deg: 1          # punkty za metr × stopień kąta
+  max_mult: 10              # maks. mnożnik
+  spin_loses_chain: 1       # 1 = obrót kasuje łańcuch, 0 = zalicza

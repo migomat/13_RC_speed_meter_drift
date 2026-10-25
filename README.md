@@ -1,9 +1,13 @@
-# X4F Launch Logger – faza 1
+# X4F Drift Logger
 
-Logger startów samochodu RC Xray X4F (napęd na przód) na XIAO nRF52840 Sense.
+Projekt pochodny X4F Launch Loggera (`10_RC_speed_meter`): ten sam sprzęt i firmware
+plus **punkty za drift na żywo** (jak w Need for Speed), wyścigi zapisywane w 20 Hz.
+
+Logger startów samochodu RC na XIAO nRF52840 Sense.
 Urządzenie tylko podsłuchuje czujnik halla silnika i sygnał gazu, nagrywa IMU
 i zapisuje starty we flash. Pobieranie odbywa się przez BLE do aplikacji PWA na Androidzie.
-Drugi tryb (fw 1.1): **ciągły zapis całych wyścigów** (50 Hz) do osobnej części flash.
+Drugi tryb (fw 1.1): **ciągły zapis całych wyścigów** (od fw 1.2: 20 Hz) do osobnej części flash.
+Fw 1.2 (drift): Xiao liczy **punkty za drift** z tych samych próbek 20 Hz – zakładka *Drift* w aplikacji.
 Specyfikacja: `CLAUDE.md`. Okablowanie: `docs/WIRING.md`. Formaty: `docs/FORMAT.md`, `docs/PROTOCOL.md`.
 
 ```
@@ -63,9 +67,9 @@ Test lokalny: `python3 -m http.server 8765 --directory app`, potem
 Obok startów (500 Hz, 4 s, bufor pierścieniowy) Xiao nagrywa **całe wyścigi**:
 
 * **Pamięć:** flash podzielony na pół – 8 slotów startów (1 MB) i obszar wyścigów (1 MB).
-* **Próbka 50 Hz, 20 B** (`RACE_RATE_HZ`): średnia z 10 taktów 500 Hz – przyrost zboczy halla
+* **Próbka 20 Hz, 20 B** (`RACE_RATE_HZ`; fw 1.1: 50 Hz): średnia z 25 taktów 500 Hz – przyrost zboczy halla
   (dokładna droga), ostatni okres obrotu, średni gaz, średnie 6 osi IMU, czas w taktach 2 ms.
-  1 kB/s → **ok. 17 min jazdy** w 1 MB (100 Hz: 8,7 min, 20 Hz: 44 min – jedna stała w `config.h`).
+  400 B/s → **ok. 43 min jazdy** w 1 MB (50 Hz: 17 min – jedna stała w `config.h`).
 * **Start sam:** gaz > 30 % (`RACE_START_PCT`), z 1 s nagrania sprzed gazu (postój = bias IMU).
 * **Koniec:** koła stoją i gaz w neutrum (albo brak sygnału gazu – wyłączony odbiornik) przez
   30 s (`RACE_END_IDLE_S`). Krótsze czekanie na sędziego nie dzieli wyścigu.
@@ -74,7 +78,7 @@ Obok startów (500 Hz, 4 s, bufor pierścieniowy) Xiao nagrywa **całe wyścigi*
   wyścigi są pobrane (`RERASE`; `FORCE` – obszar z obcymi danymi lub świadome porzucenie).
 * **Zanik zasilania** (odłączenie LiPo w trakcie jazdy – normalne zakończenie): przy starcie rekord
   domykany trailerem; giną tylko próbki z bufora RAM (≤ 0,3 s).
-* **Zapis nieblokujący:** bufor RAM 8 kB (`RACE_BUF_BYTES`, 8 s), zapis stron tylko gdy flash wolny,
+* **Zapis nieblokujący:** bufor RAM 8 kB (`RACE_BUF_BYTES`, 20 s), zapis stron tylko gdy flash wolny,
   także w czasie czekania na BLE. Pełny bufor → próbka gubiona, czas doliczany do następnej (flaga przerwy).
 * Wyścigi i starty działają jednocześnie (start spod świateł nagrywa się dodatkowo w 500 Hz).
 * **Aplikacja:** zakładka *Wyścigi* – lista, wykresy (gaz, prędkość kół, obroty, przyspieszenie
@@ -90,6 +94,53 @@ Obok startów (500 Hz, 4 s, bufor pierścieniowy) Xiao nagrywa **całe wyścigi*
   droga, v maks.), dotknięcie okrążenia = to okrążenie na mapie i na wykresach.
   Salon 2026-10-24: 16 okrążeń, tor ok. 11,8 m, najlepsze 6,00 s; Python = JS z dokładnością 1e-14.
   Ograniczenie: buksowanie zawyża drogę (tor surowy „odpływa”), dlatego dopasowanie okrążeń.
+
+## Punkty za drift (fw 1.2, aplikacja 1.4)
+
+Zakładka **Drift**: u góry punkty bieżącego łańcucha, na środku mnożnik, na dole suma; pasek kąta,
+najlepszy łańcuch, przekładki, obroty, „Zeruj punkty” (`DRIFT RESET`). Wibracja i napis przy
+przekładce, zaliczeniu łańcucha (+punkty) i obrocie.
+
+* **Liczy Xiao** (`firmware/src/drift.c`) z próbek wyścigu 20 Hz – zawsze, także przy pełnej pamięci
+  wyścigów. LIVE tylko pokazuje wynik, więc przerwy w zasięgu BLE nie gubią punktów.
+* **Kąt driftu z IMU:** przy jeździe po łuku przyspieszenie poziome jest prostopadłe do prędkości,
+  więc jego kierunek w osiach auta daje kąt między osią auta a kierunkiem jazdy. Prędkość
+  z promienia skrętu V = |a|/|ω| (koła napędzane w drifcie buksują – hall się nie nadaje).
+  Przyspieszenie styczne (gaz/hamowanie w łuku) odejmowane, gdy łuk ustalony.
+* **Punkty:** w drifcie `V·dt·(10 + 1·kąt°)` – długość i kąt; **przekładka** (drift w drugą stronę
+  bez przerwy > 1 s) = mnożnik +1 (do ×10); przerwa > 1 s = łańcuch zaliczony: suma += punkty × mnożnik;
+  **obrót** (kąt > 80° przez 0,25 s) = łańcuch stracony. Drift liczy się od 15°, |a| ≥ 0,3 g, V ≥ 1,5 m/s.
+  Wszystkie stałe: `config.h` (`DRIFT_*`) = `config.yaml` (`drift:`) = ustawienia aplikacji.
+* **Ten sam algorytm** w `drift.c` (float32, test na PC `tools/drift_host`), `rc_launch/drift.py`
+  (referencja) i `app/js/drift.js`; wektor `test_vectors/drift_eights` (ósemki z kątem 25–35°,
+  2 przekładki, obrót) – Python = JS = C, kąt w ustalonym drifcie w granicach 4° od prawdy,
+  jazda z przyczepnością (`race_oval`) = 0 punktów. W szczegółach wyścigu karta *Drift* i wykresy
+  kąta oraz punktów (przeliczone z nagrania).
+* **Montaż płytki jest kluczowy** – błąd kąta montażu = błąd kąta driftu 1:1. Po zamontowaniu Xiao
+  w aucie: kilka spokojnych okrążeń **bez driftu**, pobranie, *Wyścig → Kalibracja montażu → Wyznacz
+  → Zastosuj*. Kalibracja (`mount_calibrate` / `mountCalibrate`): oś „up” z grawitacji w postoju,
+  „left” z kierunku przyspieszenia w zakrętach (średnia ważona z odrzuceniem odstających), wynik =
+  osie co 90° + kąt w poziomie. Aplikacja wysyła montaż do Xiao (`MOUNT`) po każdym połączeniu.
+  Salon 2026-10-24 (X4F FWD): do przodu +y, w lewo −x, kąt −18,5° (rozrzut 24° – ciasno i wolno).
+* **Ograniczenia (do sprawdzenia na prawdziwym drifcie):** metoda zakłada w przybliżeniu ustaloną
+  jazdę po łuku; gwałtowne zmiany gazu w łuku i bardzo wolna jazda dają szum, stąd progi. Próg
+  i punkty da się stroić w aplikacji na nagraniach (przeliczenie wsteczne); Xiao na żywo używa
+  stałych z `config.h`. Żyroskop ±1000 dps (przekładki i obroty przekraczały 500).
+
+## Zasięg BLE
+
+TX już na maksimum nRF52840 (+8 dBm). Od fw 1.2 łącze pracuje na PHY 1M (ok. 3 dB lepsza czułość
+niż 2M), a 2M włącza się tylko na czas pobierania. Gdy zasięg spada do ~3 m przy pracującym
+wentylatorze, najpierw sprawdź przyczynę: wentylator odłączony vs. włączony (silnik stoi).
+* **Zakłócenia od wentylatora** (szczotkowy silniczek iskrzy w paśmie 2,4 GHz): kondensator
+  ceramiczny 100 nF wprost na zaciskach wentylatora, krótkie skręcone przewody, ferryt; Xiao jak
+  najdalej od wentylatora i przewodów silnika/ESC.
+* **Tłumienie:** karbonowe podwozie, pakiet LiPo i elektronika blokują 2,4 GHz. Xiao wyżej (pod
+  karoserią, nad podwoziem), antena (koniec płytki z anteną – sprawdzić w dokumentacji Seeed) wolna,
+  nie przy metalu ani karbonie; karoseria malowana farbą metaliczną też tłumi.
+* XIAO nRF52840 nie ma złącza zewnętrznej anteny – większy zasięg = inna płytka z u.FL albo
+  przekaźnik (ESP32 przy torze). BLE Coded PHY (long range) – do sprawdzenia, czy działa z Chrome
+  na Androidzie.
 
 ## Synchronizacja między urządzeniami (GitHub)
 

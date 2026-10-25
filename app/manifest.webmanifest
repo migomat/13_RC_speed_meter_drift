@@ -1,7 +1,7 @@
 {
-  "name": "X4F Launch Logger",
-  "short_name": "X4F Logger",
-  "description": "Analiza startów samochodu RC – pobieranie przez Bluetooth z X4F-LOG",
+  "name": "X4F Drift Logger",
+  "short_name": "X4F Drift",
+  "description": "Punkty za drift na żywo, analiza startów i wyścigów samochodu RC – Bluetooth z X4F-LOG",
   "lang": "pl",
   "start_url": "./index.html",
   "scope": "./",

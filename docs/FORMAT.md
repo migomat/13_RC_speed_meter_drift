@@ -89,7 +89,7 @@ F8 pobrany), `+12 długość`, `+16 CRC` (= crc32 startu). Dane startu od offset
 
 # Format pliku wyścigu (wersja 1)
 
-Ciągły zapis całego wyścigu, `RACE_RATE_HZ` = 50 Hz. Źródło prawdy: `run_format.h`
+Ciągły zapis całego wyścigu, `RACE_RATE_HZ` = 20 Hz (fw 1.2; fw 1.1: 50 Hz – częstotliwość zawsze z nagłówka). Źródło prawdy: `run_format.h`
 (`RaceHeader`, `RaceSample`, `RaceTrailer`); dekodery: `format.js` (`parseRace`),
 `parse.py` (`parse_race`). Zmiana = podbicie `RACE_FORMAT_VERSION` we wszystkich trzech.
 
@@ -111,7 +111,7 @@ halla, `sample_rate_hz` = 50, zakresy i skale IMU, neutrum gazu). Dalej:
 |---|---|---|---|
 | 48 | u32 | trigger_index | indeks próbki, w której wciśnięto gaz (przed nią 1 s postoju) |
 | 52 | u16 | tick_rate_hz | 500 – jednostka `n_ticks` |
-| 54 | u16 | decim | 10 taktów na próbkę |
+| 54 | u16 | decim | taktów na próbkę (25 przy 20 Hz, 10 przy 50 Hz) |
 | 56 | u32 | flags | jak w starcie (czas ustawiony, neutrum, błąd IMU, dane syntetyczne) |
 | 60 | u32 | t0_us | zegar Xiao na końcu pierwszej próbki |
 | 64 | u16 | sample_size | 20 |
@@ -126,7 +126,7 @@ halla, `sample_rate_hz` = 50, zakresy i skale IMU, neutrum gazu). Dalej:
 | 84 | u16 | hall_min_edge_us | |
 | 86 | 42 B | reserved | zera |
 
-## RaceSample (20 B) – średnia z 10 taktów 500 Hz
+## RaceSample (20 B) – średnia z `decim` taktów 500 Hz
 
 ```c
 uint16_t edges;        // przyrost licznika zboczy w okresie próbki (droga = Σ edges / EDGES_PER_REV · obwód/FDR)

@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>X4F Launch Logger</title>
-<meta name="description" content="Analiza startów samochodu RC Xray X4F – pobieranie przez Bluetooth z X4F-LOG">
+<title>X4F Drift Logger</title>
+<meta name="description" content="Punkty za drift na żywo, analiza startów i wyścigów samochodu RC – Bluetooth z X4F-LOG">
 <meta name="theme-color" content="#1b2a3a">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png">
@@ -14,7 +14,7 @@
 </head>
 <body>
 <header class="top">
-  <div class="brand">X4F <span>Launch Logger</span></div>
+  <div class="brand">X4F <span>Drift Logger</span></div>
   <div id="connChip" class="chip off">rozłączony</div>
 </header>
 
@@ -90,6 +90,21 @@
     <p id="spdHint" class="muted center">Połącz się z urządzeniem albo włącz tryb demo.</p>
   </section>
 
+  <!-- ======================= Drift (punkty na żywo) -->
+  <section id="view-drift" class="view">
+    <div class="drift">
+      <div id="drNoSignal" class="nosignal hidden">BRAK SYGNAŁU</div>
+      <div class="dr-chain"><span id="drPts">0</span><small id="drChainLbl">łańcuch</small></div>
+      <div class="dr-mult" id="drMult">×1</div>
+      <div class="dr-event" id="drEvent"></div>
+      <div class="dr-angle"><div class="dr-bar"><span id="drAngleBar"></span></div><b id="drAngle">0°</b></div>
+      <div class="dr-total"><small>suma</small><span id="drTotal">0</span></div>
+      <div class="speed-small"><span>najlepszy: <b id="drBest">0</b></span><span>przekładki: <b id="drTrans">0</b></span><span>obroty: <b id="drLost">0</b></span></div>
+      <button id="drReset">Zeruj punkty</button>
+    </div>
+    <p id="drHint" class="muted center small">Punkty liczy Xiao – przerwy w zasięgu nie gubią wyniku. Długość driftu i kąt dają punkty, przekładka bez utraty driftu podnosi mnożnik, obrót kasuje łańcuch.</p>
+  </section>
+
   <!-- ======================= Lista startów -->
   <section id="view-runs" class="view">
     <div class="card row">
@@ -159,6 +174,18 @@
       <h3>Okrążenia</h3>
       <div id="raceLaps" class="tablewrap"></div>
     </div>
+    <div class="card">
+      <h3>Drift</h3>
+      <div id="raceDrift" class="metrics"></div>
+      <p class="muted small">Punkty przeliczone z nagrania (ustawienia z aplikacji) – tym samym algorytmem co na Xiao.</p>
+      <details>
+        <summary>Kalibracja montażu z tego wyścigu</summary>
+        <p class="small">Użyj nagrania <b>spokojnej jazdy bez driftu</b> (kilka okrążeń, zwykłe zakręty) zaraz po zamontowaniu Xiao w aucie. Kierunek przyspieszenia w zakrętach wyznacza, jak płytka leży w aucie – od tego zależy kąt driftu.</p>
+        <button id="raceCalib">Wyznacz montaż</button>
+        <p id="raceCalibMsg" class="small"></p>
+        <button id="raceCalibApply" class="primary hidden">Zastosuj</button>
+      </details>
+    </div>
     <div id="raceCharts" class="charts"></div>
     <div class="card">
       <h3>Metryki</h3>
@@ -215,6 +242,14 @@
       <p id="setMsg" class="muted"></p>
     </div>
     <div class="card">
+      <h2>Punkty za drift</h2>
+      <p class="muted small">Dotyczą przeliczania nagrań w aplikacji. Na żywo Xiao liczy według stałych w firmware (config.h) – domyślnie takich samych.</p>
+      <div id="setDrift"></div>
+      <label class="switch"><input type="checkbox" id="setDriftSpin"> obrót kasuje punkty łańcucha</label>
+      <div class="btnrow"><button id="setDriftSave" class="primary">Zapisz</button></div>
+      <p class="muted small" id="setMount"></p>
+    </div>
+    <div class="card">
       <h2>Wygląd</h2>
       <select id="setTheme"><option value="auto">automatycznie</option><option value="light">jasny</option><option value="dark">ciemny</option></select>
     </div>
@@ -250,12 +285,13 @@
 </main>
 
 <nav class="tabs">
-  <button data-view="connect" class="active"><span>⚡</span>Połączenie</button>
+  <button data-view="connect" class="active"><span>⚡</span>Xiao</button>
   <button data-view="speed"><span>⏱</span>Prędkość</button>
+  <button data-view="drift"><span>↯</span>Drift</button>
   <button data-view="runs"><span>☰</span>Starty</button>
   <button data-view="races"><span>⚑</span>Wyścigi</button>
-  <button data-view="compare"><span>⇆</span>Porównanie</button>
-  <button data-view="settings"><span>⚙</span>Ustawienia</button>
+  <button data-view="compare"><span>⇆</span>Porównaj</button>
+  <button data-view="settings"><span>⚙</span>Opcje</button>
 </nav>
 
 <div id="toast" class="toast hidden"></div>
