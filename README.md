@@ -154,10 +154,12 @@ Wibracja i napis przy przekładce, zaliczeniu łańcucha (+punkty) i obrocie.
   w profilu auta (`DRIFT BONUS <0|1> <próg %> <czas s>`, zapisywane na Xiao) – pełny gaz dłużej niż czas =
   punkty driftu ×1,5 (`DRIFT_FULL_*`, ten sam algorytm w C/Python/JS, wektor `drift_eights` ma fazy pełnego gazu).
 * **Dźwięk silnika jak w grach (aplikacja 2.0):** silnik gra cały czas (🔊 na zakładce Drift), obroty idą za
-  gazem z LIVE (wolne ~1400 → 9000 rpm przy progu pełnego gazu), na progu ogranicznik odcina zapłony (~14 Hz),
+  gazem z LIVE (wolne ~900 → 7500 rpm przy progu pełnego gazu), na progu ogranicznik odcina zapłony (~14 Hz),
   po puszczeniu gazu strzały z wydechu i turbina: gwizd sprężarki z doładowaniem, syk zaworu upustowego
   z „ćwierkaniem”. AudioWorklet (`engine-worklet.js`) składa dźwięk z pojedynczych zapłonów rzędowej czwórki,
-  strzały mają osobny tor bez przesteru. Sprawdzone offline (`LimiterSound.render`): obroty 1400/4400/6650/8900 rpm
+  nieregularne odstępy zapłonów (bez „chiptune”), od ~2500 rpm druga warstwa – tonalne wycie dolotu (3 harmoniczne)
+  i pomruk wału, filtr wydechu otwiera się z obrotami; strzały mają osobny tor bez przesteru, filtr DC.
+  Sprawdzone offline (`LimiterSound.render`, podgląd WAV): obroty rosną z gazem
   dla 0/30/60/100 % gazu, modulacja odcięcia 14,1 Hz, strzały do 90× głośniejsze od wolnych obrotów.
   Własne nagrania: `app/sounds/limiter.mp3` (zamiast syntezy na odcięciu) i `blowoff.mp3`.
 * **Gdzie płytka:** jak najbliżej środka ciężkości (w aucie do driftu przesunięty do tyłu – wyznaczyć

@@ -95,8 +95,8 @@ function synthBlowoff(sr) {
 }
 
 
-const IDLE_RPM = 1400;
-const REDLINE_RPM = 9000;
+const IDLE_RPM = 900;
+const REDLINE_RPM = 7500;
 const REV_UP = 9000;      // [rpm/s] narastanie obrotów (lekki silnik RC-owo-gierkowy)
 const REV_DOWN = 6000;    // [rpm/s] opadanie
 
@@ -145,14 +145,19 @@ export class LimiterSound {
     this.engineIn = ctx.createGain();
     const shaper = ctx.createWaveShaper();
     const curve = new Float32Array(2048);
-    for (let i = 0; i < curve.length; i++) { const x = i / 1023.5 - 1; curve[i] = Math.tanh(2.5 * x); }
+    for (let i = 0; i < curve.length; i++) { const x = i / 1023.5 - 1; curve[i] = Math.tanh(1.6 * x); }
     shaper.curve = curve;
     this.engineIn.connect(shaper);
     this.engineOut = ctx.createGain();
-    for (const [f, q, g] of [[300, 1.4, 1.0], [1100, 1.1, 0.7], [2700, 2.2, 0.35]]) {
-      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = q;
+    // wydech: niskie dudnienie, środek (bulgot), mało brzęczących wysokich; całość przez dolnoprzepustowy
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2600; lp.Q.value = 0.5;
+    this.exhLp = lp;   // otwiera się z obrotami (update)
+    const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 35; hp.Q.value = 0.7;
+    lp.connect(hp); hp.connect(this.engineOut);
+    for (const [type, f, q, g] of [['lowpass', 220, 0.9, 1.3], ['bandpass', 160, 1.2, 0.9], ['bandpass', 650, 1.0, 0.6], ['bandpass', 1600, 1.5, 0.18]]) {
+      const bp = ctx.createBiquadFilter(); bp.type = type; bp.frequency.value = f; bp.Q.value = q;
       const gg = ctx.createGain(); gg.gain.value = g;
-      shaper.connect(bp); bp.connect(gg); gg.connect(this.engineOut);
+      shaper.connect(bp); bp.connect(gg); gg.connect(lp);
     }
     this.engineOut.connect(this.master);
     // strzały z wydechu: bez przesteru, „bang” 500–1500 Hz + trochę wysokich (trzask)
@@ -258,6 +263,7 @@ export class LimiterSound {
       P.get('load').setTargetAtTime(x, t, 0.03);
       P.get('limit').setValueAtTime(limit && !this.customLimiter ? 1 : 0, t);
       P.get('crackle').setValueAtTime(this.crackle, t);
+      this.exhLp.frequency.setTargetAtTime(1600 + 0.45 * this.rpm, t, 0.05);
       this.engineOut.gain.setTargetAtTime(limit && this.customLimiter ? 0 : 1, t, 0.02);
     }
     this.limGain.gain.setTargetAtTime(limit && (this.customLimiter || this.fallbackOnly) ? 1 : 0, t, 0.02);
