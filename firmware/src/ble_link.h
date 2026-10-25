@@ -31,6 +31,8 @@ struct Mount {
   float yaw_deg;
   int   steer_sign;   // skręt: 1 normalny, -1 odwrócony, 0 = nauka (drift.c)
   int   full_bonus;   // 1 = bonus za pełny gaz w drifcie (DRIFT BONUS)
+  float full_thr_pct; // [%] gaz uznany za pełny (profil – auto ograniczone w aparaturze, np. 67 %)
+  float full_thr_s;   // [s] tak długo nieprzerwanie = bonus
 };
 extern Mount g_mount;
 extern LiveData g_live;

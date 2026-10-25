@@ -21,8 +21,8 @@ export const DEFAULT_DRIFT = {
   max_dt_s: 0.2,          // [s] ograniczenie kroku
   min_yaw_dps: 30.0,      // [dps] poniżej – jazda prosto
   min_acc_g: 0.3,         // [g] poniżej – kąt nieokreślony (skręt nieznany)
-  min_acc_cs_g: 0.15,     // [g] jw., gdy kontra wymagana (skręt znany)
-  min_v_mps: 1.5,         // [m/s]
+  min_acc_cs_g: 0.1,      // [g] jw., gdy kontra wymagana (skręt znany); też próg liczenia kąta
+  min_v_mps: 0.5,         // [m/s] (driftowóz 25.10: ~0,25 g, ~180 °/s → ~0,8 m/s)
   v_max_mps: 30.0,        // [m/s]
   min_angle_deg: 15.0,    // [deg] kąt, od którego liczy się drift
   spin_angle_deg: 80.0,   // [deg] powyżej przez spin_s = obrót
@@ -38,7 +38,7 @@ export const DEFAULT_DRIFT = {
   learn_drift_deg: 30.0,  // [deg] drift tak głęboki, że skręt = kontra
   cs_min_pct: 8.0,        // [%] skręt od neutrum uznany za kontrę
   cs_required: 1,         // 1 = przy znanym skręcie drift wymaga kontry (albo dużego kąta)
-  angle_no_cs_deg: 35.0,  // [deg] od tego kąta drift także bez kontry
+  angle_no_cs_deg: 90.0,  // [deg] od tego kąta drift także bez kontry (90 = kontra zawsze przy znanym skręcie)
   full_bonus: 0,          // 1 = bonus za pełny gaz w drifcie (przełącznik w profilu)
   full_thr_pct: 95.0,     // [%] gaz uznany za pełny
   full_thr_s: 1.0,        // [s] tak długo nieprzerwanie = pełny gaz
@@ -56,7 +56,7 @@ export function driftInit() {
     have_prev: false, p_af: 0, p_al: 0, p_r: 0, quiet_t: 0,
     have_bias: false, b_af: 0, b_al: 0, b_r: 0,
     first: true, f_af: 0, f_al: 0, f_r: 0,
-    corner: false, corner_t: 0, r_prev: 0, v: 0, vdot: 0, angle: 0, spin_t: 0,
+    geo: false, corner: false, corner_t: 0, r_prev: 0, v: 0, vdot: 0, angle: 0, spin_t: 0,
     steer_ev: 0, steer_learned: 0, steer: NaN, cs: false, full_t: 0, full_on: false, full_drift_t: 0,
     in_drift: false, seg_t: 0, seg_dir: 0, seg_ok: false,
     chain: false, chain_ok: false, prev_dir: 0, grace_t: 0,
@@ -136,11 +136,12 @@ export function driftStep(s, p, dt, aFwd, aLeft, rDps, restHint, steerRaw = NaN,
 
   const amag = Math.sqrt(fa * fa + fl * fl);
   const rr = Math.abs(fr);
-  const corner = rr >= p.min_yaw_dps && amag >= (gate ? p.min_acc_cs_g : p.min_acc_g);
+  const geo = rr >= p.min_yaw_dps && amag >= p.min_acc_cs_g;
+  const corner = geo && amag >= (gate ? p.min_acc_cs_g : p.min_acc_g);
   let angle = 0, d = 0;
-  if (corner) {
+  if (geo) {
     const vRaw = Math.min(amag * G / (rr * D2R), p.v_max_mps);
-    s.corner_t = s.corner ? s.corner_t + dt : 0;
+    s.corner_t = s.geo ? s.corner_t + dt : 0;
     if (s.corner_t < p.steady_s - T_EPS) {
       s.v = vRaw;
       s.vdot = 0;
@@ -162,11 +163,12 @@ export function driftStep(s, p, dt, aFwd, aLeft, rDps, restHint, steerRaw = NaN,
     s.vdot = 0;
     s.corner_t = 0;
   }
+  s.geo = geo;
   s.corner = corner;
   s.r_prev = fr;
   s.angle = angle;
 
-  if (!p.steer_sign && s.steer_learned === 0 && corner && !Number.isNaN(steerRaw) &&
+  if (!p.steer_sign && s.steer_learned === 0 && geo && !Number.isNaN(steerRaw) &&
       Math.abs(steerRaw) >= p.cs_min_pct) {
     const agree = steerRaw * fr > 0 ? 1 : -1;
     if (Math.abs(angle) < p.min_angle_deg) s.steer_ev += dt * agree;

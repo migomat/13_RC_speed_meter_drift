@@ -64,7 +64,7 @@ static bool      s_imu_ok, s_flash_ok, s_ble_ok, s_hall_ok, s_thr_ok;
 // o yaw. Domyślnie z config.h, zmiana w działaniu komendą MOUNT (wynik kalibracji z aplikacji).
 Mount g_mount = {{IMU_AXIS_FORWARD, IMU_AXIS_LEFT, IMU_AXIS_UP},
                  {IMU_SIGN_FORWARD, IMU_SIGN_LEFT, IMU_SIGN_UP}, IMU_YAW_OFFSET_DEG,
-                 DRIFT_STEER_SIGN, DRIFT_FULL_BONUS};
+                 DRIFT_STEER_SIGN, DRIFT_FULL_BONUS, DRIFT_FULL_THR_PCT, DRIFT_FULL_THR_S};
 
 static inline float car_axis(const float v[3], int k) { return v[g_mount.idx[k]] * g_mount.sign[k]; }
 
@@ -92,6 +92,8 @@ static void on_race_sample(const RaceSample& r) {
   s_dp.yaw_offset_deg = g_mount.yaw_deg;
   s_dp.steer_sign = g_mount.steer_sign;
   s_dp.full_bonus = g_mount.full_bonus;
+  s_dp.full_thr_pct = g_mount.full_thr_pct;
+  s_dp.full_thr_s = g_mount.full_thr_s;
   drift_step(&s_ds, &s_dp, (float)r.n_ticks / SAMPLE_RATE_HZ, car_axis(a, 0), car_axis(a, 1),
              car_axis(g, 2), rest, sv, sp, pct);
   g_live.d_full = s_ds.full_on;

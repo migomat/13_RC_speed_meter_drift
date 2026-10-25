@@ -98,7 +98,10 @@
       <div class="dr-mult" id="drMult">×1</div>
       <div class="dr-event" id="drEvent"></div>
       <div class="dr-angle"><div class="dr-bar"><span id="drAngleBar"></span></div><b id="drAngle">0°</b></div>
-      <div class="dr-steer"><span id="drCs" class="dr-cs">KONTRA</span><span id="drFull" class="dr-cs hidden">PEŁNY GAZ</span><span id="drSteer" class="muted small"></span></div>
+      <div class="dr-steerbar"><span class="l">L</span><div class="dr-sbar"><i id="drSteerDot"></i></div><span class="r">P</span></div>
+      <div id="drSteerTxt" class="dr-steertxt">skręt: –</div>
+      <div class="dr-steer"><span id="drCs" class="dr-cs">KONTRA</span><span id="drFull" class="dr-cs hidden">PEŁNY GAZ</span></div>
+      <p id="drWarn" class="warn small hidden"></p>
       <div class="dr-total"><small>suma</small><span id="drTotal">0</span></div>
       <div class="speed-small"><span>najlepszy: <b id="drBest">0</b></span><span>przekładki: <b id="drTrans">0</b></span><span>obroty: <b id="drLost">0</b></span></div>
       <div class="btnrow"><button id="drReset">Zeruj punkty</button><button id="drSound">🔇 dźwięk</button></div>
@@ -183,6 +186,7 @@
       <details>
         <summary>Kalibracja montażu z tego wyścigu</summary>
         <p class="small">Użyj nagrania <b>spokojnej jazdy bez driftu</b> (kilka okrążeń, zwykłe zakręty) zaraz po zamontowaniu Xiao w aucie. Kierunek przyspieszenia w zakrętach wyznacza, jak płytka leży w aucie – od tego zależy kąt driftu. Z tego samego nagrania wychodzi kierunek skrętu (normalny / odwrócony).</p>
+        <p class="small muted">Liczone z zakresu widocznego na wykresach – zaznacz palcem fragment ze spokojną jazdą (bez driftu), potem „Wyznacz”.</p>
         <button id="raceCalib">Wyznacz montaż</button>
         <p id="raceCalibMsg" class="small"></p>
         <button id="raceCalibApply" class="primary hidden">Zastosuj</button>
@@ -259,7 +263,9 @@
       <label>Kierunek skrętu<select id="setSteerSign"><option value="0">automatycznie (nauka w jeździe)</option><option value="1">normalny</option><option value="-1">odwrócony</option></select></label>
       <label class="switch"><input type="checkbox" id="setCsReq"> drift wymaga kontry (gdy skręt podłączony)</label>
       <label class="switch"><input type="checkbox" id="setFullBonus"> bonus za pełny gaz – gaz ≥ 95 % dłużej niż 1 s: punkty driftu ×1,5 (liczy też Xiao)</label>
-      <label class="switch"><input type="checkbox" id="setSound"> dźwięk odcięcia przy pełnym gazie (ten telefon)</label>
+      <label class="switch"><input type="checkbox" id="setSound"> dźwięk odcięcia od progu pełnego gazu (ten telefon)</label>
+      <label class="switch"><input type="checkbox" id="setTurbo"> turbina: gwizd sprężarki i zawór upustowy</label>
+      <p class="muted small">Własny dźwięk: plik <code>app/sounds/limiter.mp3</code> (albo .ogg / .wav) – zapętlany klip odcięcia, opcjonalnie <code>blowoff.mp3</code>.</p>
       <label>Głośność<input id="setVolume" type="range" min="0" max="1" step="0.05"></label>
       <button id="setSoundTest">▶ Test dźwięku</button>
       <div class="btnrow"><button id="setDriftSave" class="primary">Zapisz</button></div>

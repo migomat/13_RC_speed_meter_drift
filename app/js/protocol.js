@@ -152,7 +152,11 @@ export class Device {
   vmaxReset() { return this.command('VMAX RESET'); }
   /** Punkty driftu i montaż (protokół ≥ 3). */
   driftReset() { return this.command('DRIFT RESET'); }
-  driftBonus(on) { return this.command(`DRIFT BONUS ${on ? 1 : 0}`); }   // protokół ≥ 6, zapis w profilu Xiao
+  // protokół ≥ 6 (próg % i czas s: ≥ 7), zapis w profilu Xiao
+  driftBonus(on, pct, sec) {
+    const extra = pct === undefined ? '' : ` ${Math.round(pct)} ${(+sec || 0).toFixed(1)}`;
+    return this.command(`DRIFT BONUS ${on ? 1 : 0}${extra}`);
+  }
   mount(axes, yawDeg, steerSign, name) {
     if (!axes) return this.command('MOUNT');
     const st = steerSign === undefined ? '' : ` ${Math.trunc(steerSign) || 0}`;   // protokół ≥ 4

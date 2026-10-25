@@ -48,7 +48,7 @@ typedef struct {
   float b_af, b_al, b_r;
   int   first;
   float f_af, f_al, f_r;
-  int   corner;
+  int   geo, corner;
   float corner_t, r_prev, v, vdot, angle, spin_t;
   float steer_ev;
   int   steer_learned;

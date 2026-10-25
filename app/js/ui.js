@@ -13,12 +13,13 @@ import { LimiterSound } from './sound.js';
 
 const limiter = new LimiterSound();
 // dźwięk – ustawienie tego urządzenia (nie profilu auta)
-const soundPref = { on: false, volume: 0.5 };
+const soundPref = { on: false, volume: 0.6, turbo: true };
 try { Object.assign(soundPref, JSON.parse(localStorage.getItem('x4f_sound') || '{}')); } catch (e) { /* */ }
 limiter.setVolume(soundPref.volume);
+limiter.setTurbo(soundPref.turbo);
 function saveSoundPref() { try { localStorage.setItem('x4f_sound', JSON.stringify(soundPref)); } catch (e) { /* */ } }
 
-const APP_VERSION = '1.8.0';
+const APP_VERSION = '1.9.0';
 const $ = (id) => document.getElementById(id);
 const fmt = (v, d = 2) => (v == null || Number.isNaN(v) ? '–' : v.toFixed(d).replace('.', ','));
 
@@ -116,6 +117,9 @@ function goto(view) {
   if (LIVE_VIEWS.includes(view) && !wasLive) enterSpeed();
   if (view === 'drift') {
     $('drProfile').textContent = `profil: ${activeProfile().name}`;
+    $('drWarn').textContent = state.settings.mount_set ? '' :
+      'Montaż nieskalibrowany – kąt driftu będzie błędny. Kilka spokojnych kółek bez driftu → Wyścigi → kalibracja montażu.';
+    show($('drWarn'), !state.settings.mount_set);
     if (state.live.data) renderDrift(state.live.data);
   }
   if (view === 'settings') renderSettings();
@@ -479,16 +483,38 @@ function onLive(m) {
 }
 
 // Montaż płytki z ustawień → Xiao (protokół ≥ 3; Xiao pamięta go do wyłączenia zasilania)
+// Profil, w którym nikt nie ustawiał montażu (kalibracja / ręcznie), przejmuje montaż, kierunek skrętu
+// i pełny gaz zapisane na Xiao pod tą samą nazwą – np. ustawione z komputera po analizie nagrania.
+async function adoptFromXiao() {
+  const i = state.info;
+  if (!i || (i.proto || 1) < 7 || !i.mount || !i.mount_saved || state.settings.mount_set) return false;
+  if (profileShowName(i.mount[5]) !== activeProfile().name) return false;
+  const s = mergeSettings(state.settings);
+  s.imu_axes = { forward: i.mount[0], left: i.mount[1], up: i.mount[2] };
+  s.estimator.yaw_offset_deg = +i.mount[3] || 0;
+  s.drift.steer_sign = +i.mount[4] || 0;
+  if (i.full_pct) s.drift.full_thr_pct = +i.full_pct;
+  if (i.full_s !== undefined) s.drift.full_thr_s = +i.full_s;
+  s.drift.full_bonus = i.drift_bonus ? 1 : 0;
+  s.mount_set = true;
+  await persistSettings(s);
+  toast('Przejęto z Xiao: montaż, kierunek skrętu i próg gazu');
+  return true;
+}
+
 async function sendMount() {
   const d = state.device;
   if (!d || !state.info || (state.info.proto || 1) < 3) return;
+  await adoptFromXiao();
   const proto = state.info.proto || 1;
   const st = proto >= 4 ? (state.settings.drift.steer_sign || 0) : undefined;
   const name = proto >= 5 ? profileWireName(activeProfile().name) : undefined;
   try {
     const r = await d.mount(state.settings.imu_axes, state.settings.estimator.yaw_offset_deg, st, name);
     if (r && r.mount) state.xiaoMount = { mount: r.mount, saved: !!r.mount_saved };
-    if (proto >= 6) await d.driftBonus(!!state.settings.drift.full_bonus);
+    const dr = state.settings.drift;
+    if (proto >= 7) await d.driftBonus(!!dr.full_bonus, dr.full_thr_pct, dr.full_thr_s);
+    else if (proto >= 6) await d.driftBonus(!!dr.full_bonus);
     if (r && r.mount && !r.mount_saved) {
       // zapis na Xiao w następnej pętli (albo po nagrywaniu) – potwierdzenie chwilę później
       setTimeout(async () => {
@@ -542,11 +568,21 @@ function renderDrift(m) {
   show($('drFull'), m.d_full !== undefined);
   $('drFull').classList.toggle('on', full);
   $('drFull').textContent = full && state.settings.drift.full_bonus ? `PEŁNY GAZ ×${fmt(state.settings.drift.full_bonus_mult, 1)}` : 'PEŁNY GAZ';
-  limiter.set(full && soundPref.on && performance.now() - state.live.last < 300);
+  limiter.update(m.thr_pct || 0, state.settings.drift.full_thr_pct, soundPref.on);
   show($('drCs'), m.d_cs !== undefined);
-  if (m.d_steer_sign === undefined) $('drSteer').textContent = '';
-  else if (!m.d_steer_sign) $('drSteer').textContent = 'skręt: kierunek jeszcze nieznany (jedź chwilę z przyczepnością)';
-  else $('drSteer').textContent = `skręt ${m.st > 0 ? '←' : m.st < 0 ? '→' : '·'} ${Math.abs(Math.round(m.st || 0))} % · ${m.d_steer_sign > 0 ? 'normalny' : 'odwrócony'}`;
+  renderSteer(m);
+}
+
+// Podgląd skrętu: „+” = w lewo po uwzględnieniu kierunku (Xiao: znak z profilu albo nauczony).
+// Skręć kołami w lewo – napis musi pokazać W LEWO; jeśli W PRAWO, zmień „Kierunek skrętu” w Opcjach.
+function renderSteer(m) {
+  const sgn = m.d_steer_sign;
+  if (m.st === undefined) { $('drSteerTxt').textContent = 'skręt: firmware bez skrętu'; return; }
+  const v = Math.max(-100, Math.min(100, m.st || 0));
+  $('drSteerDot').style.left = `${50 - v / 2}%`;
+  const dir = Math.abs(v) < 3 ? 'prosto' : v > 0 ? 'W LEWO' : 'W PRAWO';
+  const kind = sgn > 0 ? 'normalny' : sgn < 0 ? 'odwrócony' : 'kierunek nieznany – znak surowy';
+  $('drSteerTxt').textContent = `skręt: ${dir} ${Math.abs(Math.round(v))} % (${kind})`;
 }
 
 function vibrate(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) { /* */ } }
@@ -584,14 +620,14 @@ async function enterSpeed() {
     show($('spdNoSignal'), stale);
     document.querySelector('.speedo').classList.toggle('stale', stale);
     show($('drNoSignal'), stale);
-    if (stale) limiter.set(false);
+    if (stale) limiter.stop();
     document.querySelector('.drift').classList.toggle('stale', stale);
   }, 100);
 }
 
 async function leaveSpeed() {
   clearInterval(speedTimer);
-  limiter.set(false);
+  limiter.stop();
   if (!state.downloading) await wakeLock(false);
   if (state.device && !$('liveToggle').checked) { try { await state.device.live(false); } catch (e) { /* */ } }
 }
@@ -876,11 +912,33 @@ function renderRaceDrift(dr) {
     ss > 0 ? 'normalny' : ss < 0 ? 'odwrócony' : 'brak / nieustalony'}</div></div>`;
 }
 
+// Wycinek nagrania [a, b] s (do kalibracji) – postój sprzed gazu zostaje (oś „up”, bias)
+function raceSlice(race, a, b) {
+  const ti = race.header.trigger_index;
+  const idx = [];
+  for (let i = 0; i < race.n; i++) if (i < ti || (race.t_s[i] >= a && race.t_s[i] <= b)) idx.push(i);
+  const out = { ...race, n: idx.length };
+  for (const k of ['edges', 'period_rev', 'throttle_us', 'ax', 'ay', 'az', 'gx', 'gy', 'gz', 'flags', 'n_ticks', 'steer_us', 't_s']) {
+    const src = race[k];
+    const dst = new src.constructor(idx.length);
+    idx.forEach((i, j) => { dst[j] = src[i]; });
+    out[k] = dst;
+  }
+  return out;
+}
+
 function calibrateFromRace() {
   const rec = state.currentRace;
   if (!rec) return;
   try {
-    const cal = mountCalibrate(parseRace(new Uint8Array(rec.raw), { verifyCrc: false }));
+    let race = parseRace(new Uint8Array(rec.raw), { verifyCrc: false });
+    let rangeTxt = '';
+    if (state.raceCharts && state.raceCharts.getRange) {
+      const [a, b] = state.raceCharts.getRange();
+      const t = race.t_s;
+      if (a > t[0] + 0.5 || b < t[t.length - 1] - 0.5) { race = raceSlice(race, a, b); rangeTxt = ` Zakres ${fmt(a, 0)}–${fmt(b, 0)} s.`; }
+    }
+    const cal = mountCalibrate(race);
     state.calib = cal;
     const ax = cal.imu_axes;
     const cur = state.settings.imu_axes;
@@ -890,7 +948,7 @@ function calibrateFromRace() {
     const stTxt = cal.steer_sign > 0 ? 'normalny' : cal.steer_sign < 0 ? 'odwrócony' : 'nieustalony (brak skrętu w nagraniu)';
     $('raceCalibMsg').innerHTML = `Do przodu <b>${ax.forward}</b>, w lewo <b>${ax.left}</b>, w górę <b>${ax.up}</b>, ` +
       `kąt w poziomie <b>${fmt(cal.yaw_offset_deg, 1)}°</b> (z ${cal.samples} próbek w zakrętach, rozrzut ${fmt(cal.spread_deg, 0)}°). ` +
-      `Skręt: <b>${stTxt}</b>.` +
+      `Skręt: <b>${stTxt}</b>.${rangeTxt}` +
       (cal.spread_deg > 30 ? ' <span class="warn">Duży rozrzut – nagranie z poślizgami albo za wolna jazda; wynik niepewny.</span>' : '') +
       (getRaceDrift(rec).summary.drift_time_s > 2 ? ' <span class="warn">W nagraniu jest drift – kalibruj na spokojnych kółkach z przyczepnością (inaczej montaż i kierunek skrętu wyjdą błędnie).</span>' : '') +
       (same ? ' Tak jak w ustawieniach.' : '');
@@ -909,6 +967,7 @@ async function applyCalibration() {
   s.imu_axes = { ...cal.imu_axes };
   s.estimator.yaw_offset_deg = Math.round(cal.yaw_offset_deg * 10) / 10;
   if (cal.steer_sign) s.drift.steer_sign = cal.steer_sign;
+  s.mount_set = true;
   await persistSettings(s);
   await sendMount();
   show($('raceCalibApply'), false);
@@ -1058,6 +1117,7 @@ const DRIFT_FIELDS = [
   ['min_angle_deg', 'Kąt od którego liczy się drift [°]'], ['chain_gap_s', 'Przerwa kończąca łańcuch [s]'],
   ['max_mult', 'Maks. mnożnik'], ['min_acc_g', 'Min. przyspieszenie boczne [g]'], ['min_v_mps', 'Min. prędkość [m/s]'],
   ['spin_angle_deg', 'Kąt obrotu (utrata) [°]'],
+  ['full_thr_pct', 'Pełny gaz od [%] (dźwięk odcięcia i bonus)'], ['full_thr_s', 'Bonus po [s] pełnego gazu'],
 ];
 const EST_FIELDS = [
   ['yaw_offset_deg', 'Kąt montażu w poziomie [°]'], ['zupt_ms', 'ZUPT – czas bezruchu [ms]'],
@@ -1087,6 +1147,7 @@ function renderSettings() {
   $('setCsReq').checked = !!s.drift.cs_required;
   $('setFullBonus').checked = !!s.drift.full_bonus;
   $('setSound').checked = !!soundPref.on;
+  $('setTurbo').checked = !!soundPref.turbo;
   $('setVolume').value = soundPref.volume;
   $('setMount').textContent = `Montaż płytki: do przodu ${s.imu_axes.forward}, w lewo ${s.imu_axes.left}, w górę ${s.imu_axes.up}, ` +
     `kąt ${fmt(s.estimator.yaw_offset_deg, 1)}° – kalibracja w szczegółach wyścigu (jazda bez driftu). ` +
@@ -1111,6 +1172,9 @@ async function saveSettings() {
   s.drift.steer_sign = parseInt($('setSteerSign').value, 10) || 0;
   s.drift.cs_required = $('setCsReq').checked ? 1 : 0;
   s.drift.full_bonus = $('setFullBonus').checked ? 1 : 0;
+  const old = state.settings;
+  if (JSON.stringify(old.imu_axes) !== JSON.stringify(s.imu_axes) || old.estimator.yaw_offset_deg !== s.estimator.yaw_offset_deg ||
+      old.drift.steer_sign !== s.drift.steer_sign) s.mount_set = true;
   if (DRIFT_FIELDS.some(([k]) => !(s.drift[k] >= 0))) { $('setMsg').textContent = 'Niepoprawne wartości punktów za drift.'; return; }
   const axesUsed = new Set(Object.values(s.imu_axes).map((a) => a[1]));
   if (axesUsed.size !== 3) { $('setMsg').textContent = 'Każda oś auta musi mieć inną oś płytki.'; return; }
@@ -1388,12 +1452,13 @@ async function init() {
   renderSoundBtn();
   $('drSound').onclick = () => {
     soundPref.on = !soundPref.on;
-    if (soundPref.on) limiter.unlock(); else limiter.set(false);
+    if (soundPref.on) limiter.unlock(); else limiter.stop();
     saveSoundPref(); renderSoundBtn();
   };
+  $('setTurbo').onchange = (e) => { soundPref.turbo = e.target.checked; limiter.setTurbo(soundPref.turbo); saveSoundPref(); };
   $('setSound').onchange = (e) => {
     soundPref.on = e.target.checked;
-    if (soundPref.on) limiter.unlock(); else limiter.set(false);
+    if (soundPref.on) limiter.unlock(); else limiter.stop();
     saveSoundPref(); renderSoundBtn();
   };
   $('setVolume').oninput = (e) => { soundPref.volume = parseFloat(e.target.value); limiter.setVolume(soundPref.volume); saveSoundPref(); };

@@ -166,3 +166,8 @@ nav.tabs button.active { color: var(--accent); font-weight: 600; }
 .dr-steer { display: flex; align-items: center; gap: .8rem; min-height: 2rem; }
 .dr-cs { font-weight: 800; letter-spacing: .06em; padding: .2rem .7rem; border-radius: 8px; background: var(--border); color: var(--muted); }
 .dr-cs.on { background: var(--ok); color: #fff; }
+.dr-steerbar { display: flex; align-items: center; gap: .5rem; width: min(100%, 420px); font-weight: 700; color: var(--muted); }
+.dr-sbar { flex: 1; height: 14px; border-radius: 7px; background: var(--border); position: relative; }
+.dr-sbar::after { content: ''; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 2px; background: var(--muted); }
+.dr-sbar i { position: absolute; top: -4px; width: 22px; height: 22px; margin-left: -11px; left: 50%; border-radius: 50%; background: var(--accent); transition: left .08s linear; }
+.dr-steertxt { font-size: 1.15rem; font-weight: 700; }

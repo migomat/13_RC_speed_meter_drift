@@ -133,13 +133,14 @@ void drift_step(DriftState* s, const DriftParams* p, float dt, float a_fwd, floa
 
   float amag = sqrtf(fa * fa + fl * fl);
   float rr = fabsf(fr);
-  int corner = rr >= p->min_yaw_dps && amag >= (gate ? p->min_acc_cs_g : p->min_acc_g);
+  int geo = rr >= p->min_yaw_dps && amag >= p->min_acc_cs_g;   /* kąt i V; nauka skrętu */
+  int corner = geo && amag >= (gate ? p->min_acc_cs_g : p->min_acc_g);   /* łuk do punktów */
   float angle = 0.0f;
   int d = 0;
-  if (corner) {
+  if (geo) {
     float v_raw = amag * G_MPS2 / (rr * DEG2RAD);
     if (v_raw > p->v_max_mps) v_raw = p->v_max_mps;
-    s->corner_t = s->corner ? s->corner_t + dt : 0.0f;
+    s->corner_t = s->geo ? s->corner_t + dt : 0.0f;
     if (s->corner_t < p->steady_s - T_EPS) {
       s->v = v_raw;
       s->vdot = 0.0f;
@@ -161,11 +162,12 @@ void drift_step(DriftState* s, const DriftParams* p, float dt, float a_fwd, floa
     s->vdot = 0.0f;
     s->corner_t = 0.0f;
   }
+  s->geo = geo;
   s->corner = corner;
   s->r_prev = fr;
   s->angle = angle;
 
-  if (!p->steer_sign && s->steer_learned == 0 && corner && steer_valid &&
+  if (!p->steer_sign && s->steer_learned == 0 && geo && steer_valid &&
       fabsf(steer_raw) >= p->cs_min_pct) {
     float agree = steer_raw * fr > 0.0f ? 1.0f : -1.0f;
     if (fabsf(angle) < p->min_angle_deg) s->steer_ev += dt * agree;

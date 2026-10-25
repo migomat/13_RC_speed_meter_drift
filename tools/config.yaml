@@ -46,8 +46,8 @@ drift:
   max_dt_s: 0.2             # [s] ograniczenie kroku
   min_yaw_dps: 30           # [dps] poniżej – jazda prosto
   min_acc_g: 0.3            # [g] poniżej – kąt nieokreślony (skręt nieznany)
-  min_acc_cs_g: 0.15        # [g] jw., gdy kontra wymagana (skręt znany)
-  min_v_mps: 1.5            # [m/s]
+  min_acc_cs_g: 0.1         # [g] jw., gdy kontra wymagana (skręt znany); próg liczenia kąta
+  min_v_mps: 0.5            # [m/s]
   v_max_mps: 30             # [m/s]
   min_angle_deg: 15         # [deg] kąt, od którego liczy się drift
   spin_angle_deg: 80        # [deg] powyżej przez spin_s = obrót
@@ -63,4 +63,4 @@ drift:
   learn_drift_deg: 30       # [deg] drift tak głęboki, że skręt = kontra
   cs_min_pct: 8             # [%] skręt od neutrum uznany za kontrę
   cs_required: 1            # 1 = przy znanym skręcie drift wymaga kontry
-  angle_no_cs_deg: 35       # [deg] od tego kąta drift także bez kontry
+  angle_no_cs_deg: 90       # [deg] od tego kąta drift także bez kontry (90 = zawsze kontra)

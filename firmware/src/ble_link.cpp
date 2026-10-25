@@ -160,8 +160,8 @@ static void mount_str(char* b, size_t n) {
            g_mount.sign[2] > 0 ? '+' : '-', AXIS_CH[g_mount.idx[2]], g_mount.yaw_deg,
            g_mount.steer_sign, g_mount_name, mount_store_saved() ? "true" : "false");
   size_t k = strlen(b);
-  snprintf(b + k, n - k, ",\"mount_save_us\":%lu,\"drift_bonus\":%d", (unsigned long)mount_store_save_us(),
-           g_mount.full_bonus);
+  snprintf(b + k, n - k, ",\"mount_save_us\":%lu,\"drift_bonus\":%d,\"full_pct\":%.0f,\"full_s\":%.1f",
+           (unsigned long)mount_store_save_us(), g_mount.full_bonus, g_mount.full_thr_pct, g_mount.full_thr_s);
 }
 
 // MOUNT <forward> <left> <up> <yaw_deg> [<znak skrętu 1/-1/0> [<nazwa profilu>]],
@@ -182,6 +182,8 @@ static bool parse_mount(char** argv, int argc, Mount* m) {
   m->yaw_deg = (float)atof(argv[3]);
   m->steer_sign = argc > 4 ? atoi(argv[4]) : g_mount.steer_sign;
   m->full_bonus = g_mount.full_bonus;   // osobna komenda DRIFT BONUS
+  m->full_thr_pct = g_mount.full_thr_pct;
+  m->full_thr_s = g_mount.full_thr_s;
   if (argc > 5) {   // nazwa: bez cudzysłowu i ukośnika (trafia do JSON), UTF-8 dozwolone
     size_t n = strlen(argv[5]);
     if (n >= MOUNT_NAME_LEN) return false;
@@ -524,10 +526,18 @@ static void handle_line(Link& l, char* line) {
     s_drift_reset = true;
     return send_text(l, "OK");
   }
-  if (!strcmp(c, "DRIFT") && argc >= 3 && !strcmp(argv[1], "BONUS")) {   // bonus za pełny gaz (v6)
+  // DRIFT BONUS <0|1> [<próg pełnego gazu %> [<czas s>]] – bonus za pełny gaz (v6; próg i czas v7)
+  if (!strcmp(c, "DRIFT") && argc >= 3 && !strcmp(argv[1], "BONUS")) {
     int on = atoi(argv[2]) ? 1 : 0;
-    if (on != g_mount.full_bonus) {
+    float pct = argc > 3 ? (float)atof(argv[3]) : g_mount.full_thr_pct;
+    float sec = argc > 4 ? (float)atof(argv[4]) : g_mount.full_thr_s;
+    if (!(pct >= 10.0f && pct <= 100.0f) || !(sec >= 0.0f && sec <= 10.0f)) return send_err(l, "BAD_BONUS");
+    pct = roundf(pct);
+    sec = roundf(sec * 10.0f) / 10.0f;
+    if (on != g_mount.full_bonus || pct != g_mount.full_thr_pct || sec != g_mount.full_thr_s) {
       g_mount.full_bonus = on;
+      g_mount.full_thr_pct = pct;
+      g_mount.full_thr_s = sec;
       mount_store_request_save();   // część profilu – zostaje po resecie
     }
     s_out[0] = '{';

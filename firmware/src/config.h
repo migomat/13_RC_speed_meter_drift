@@ -6,9 +6,9 @@
 #include <stdint.h>
 
 #define FW_VERSION_MAJOR    1
-#define FW_VERSION_MINOR    5
-#define FW_VERSION_PATCH    1
-#define FW_VERSION_STR      "1.5.1"
+#define FW_VERSION_MINOR    6
+#define FW_VERSION_PATCH    0
+#define FW_VERSION_STR      "1.6.0"
 
 // ---------------------------------------------------------------- hall
 // Tryb czujnika halla: 1 (tylko linia A) albo 3 (A/B/C).
@@ -165,8 +165,8 @@
 #define DRIFT_MAX_DT_S              0.2f    // [s] ograniczenie kroku
 #define DRIFT_MIN_YAW_DPS           30.0f   // [dps] poniżej – jazda prosto
 #define DRIFT_MIN_ACC_G             0.3f    // [g] poniżej – kąt nieokreślony (skręt nieznany)
-#define DRIFT_MIN_ACC_CS_G          0.15f   // [g] jw., gdy kontra wymagana (skręt znany)
-#define DRIFT_MIN_V_MPS             1.5f    // [m/s]
+#define DRIFT_MIN_ACC_CS_G          0.1f    // [g] jw., gdy kontra wymagana (skręt znany); próg liczenia kąta
+#define DRIFT_MIN_V_MPS             0.5f    // [m/s] (driftowóz: ~0,8 m/s w ciasnym torze)
 #define DRIFT_V_MAX_MPS             30.0f   // [m/s]
 #define DRIFT_MIN_ANGLE_DEG         15.0f   // [deg] kąt, od którego liczy się drift
 #define DRIFT_SPIN_ANGLE_DEG        80.0f   // [deg] powyżej przez DRIFT_SPIN_S = obrót
@@ -182,7 +182,7 @@
 #define DRIFT_LEARN_DRIFT_DEG       30.0f   // [deg] drift tak głęboki, że skręt = kontra
 #define DRIFT_CS_MIN_PCT            8.0f    // [%] skręt od neutrum uznany za kontrę
 #define DRIFT_CS_REQUIRED           1       // 1 = przy znanym skręcie drift wymaga kontry
-#define DRIFT_ANGLE_NO_CS_DEG       35.0f   // [deg] od tego kąta drift także bez kontry
+#define DRIFT_ANGLE_NO_CS_DEG       90.0f   // [deg] od tego kąta drift także bez kontry (90 = zawsze kontra)
 #define DRIFT_FULL_BONUS            0       // bonus za pełny gaz – domyślnie wył. (profil: DRIFT BONUS 1)
 #define DRIFT_FULL_THR_PCT          95.0f   // [%] gaz uznany za pełny
 #define DRIFT_FULL_THR_S            1.0f    // [s] tak długo nieprzerwanie = pełny gaz
@@ -202,11 +202,12 @@
 // ---------------------------------------------------------------- format
 #define RUN_FORMAT_VERSION  1
 #define RACE_FORMAT_VERSION 2       // 2: skręt w próbce (22 B) i neutrum skrętu w nagłówku
-#define PROTOCOL_VERSION    6       // 2: komendy wyścigów RLIST/RGET/RDEL/RERASE/RSTOP
+#define PROTOCOL_VERSION    7       // 2: komendy wyścigów RLIST/RGET/RDEL/RERASE/RSTOP
                                     // 3: punkty driftu w LIVE, DRIFT RESET, MOUNT
                                     // 4: skręt (LIVE "st", kontra i znak skrętu w "d", MOUNT … <znak>)
                                     // 5: profil auta – MOUNT … <nazwa>, zapis na stałe (mount_saved)
                                     // 6: bonus za pełny gaz – DRIFT BONUS 0|1, flaga full w "d"
+                                    // 7: DRIFT BONUS 0|1 <próg %> <czas s> (pełny gaz konfigurowalny)
 
 // ---------------------------------------------------------------- debug
 // Komendy SIM_* (syntetyczne zbocza/gaz) dostępne tylko przez USB.

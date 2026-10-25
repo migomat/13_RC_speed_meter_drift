@@ -108,6 +108,7 @@ export function syncedCharts(container, x, groups, { syncKey = 'run', onRange = 
   return {
     charts,
     setRange: (a, b) => setAll(a, b),
+    getRange: () => [charts[0].scales.x.min, charts[0].scales.x.max],
     resetRange: () => setAll(fullRange[0], fullRange[1]),
     destroy: () => { ro.disconnect(); charts.forEach((c) => c.destroy()); container.innerHTML = ''; },
   };

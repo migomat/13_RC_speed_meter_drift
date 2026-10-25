@@ -21,8 +21,9 @@ i gaz w neutrum, steer_raw = skręt [% od neutrum, znak surowy] albo NaN):
  3. filtr IIR 1. rzędu (lpf_tau_s) af, al, ω; dt ograniczone do max_dt_s (przerwy w zapisie)
  4. skręt: znak = steer_sign (ustawiony / z kalibracji) albo nauczony (gdy steer_sign = 0);
     steer = steer_raw·znak (+ = w lewo); kontra = |steer| ≥ cs_min_pct ∧ znak(steer) = −znak(ω)
- 5. jazda po łuku: |ω| ≥ min_yaw_dps ∧ |a| ≥ a_min, a_min = min_acc_cs_g, gdy skręt znany
-    i kontra wymagana (cs_required), inaczej min_acc_g; corner_t = czas od wejścia w łuk
+ 5. geo: |ω| ≥ min_yaw_dps ∧ |a| ≥ min_acc_cs_g – liczony kąt i V (corner_t = czas od wejścia);
+    łuk do punktów (corner): geo ∧ |a| ≥ a_min, a_min = min_acc_cs_g, gdy skręt znany i kontra
+    wymagana (cs_required), inaczej min_acc_g
     V_raw = min(|a|·G / |ω|, v_max) [m/s] (prędkość z promienia skrętu)
     corner_t < steady_s: V = V_raw, V' = 0 (próbki mieszane: hamowanie + skręt)
     inaczej: V filtr v_tau_s; V' = filtr vdot_tau_s z dV/dt, gdy |Δω|/dt < steady_yaw_acc,
@@ -30,7 +31,8 @@ i gaz w neutrum, steer_raw = skręt [% od neutrum, znak surowy] albo NaN):
  6. s = znak ω; θ0 = atan2(af, al·s); β0 = −s·θ0 (kierunek prędkości w osiach auta)
     usunięcie przyspieszenia stycznego: af −= V'/G·cos β0, al −= V'/G·sin β0
     θ = atan2(af, al·s) [deg] – kąt driftu, > 0 = nadsterowność (tył na zewnątrz)
- 7. nauka znaku skrętu (steer_sign = 0, jeszcze nieznany, |steer_raw| ≥ cs_min_pct, łuk):
+ 7. nauka znaku skrętu (steer_sign = 0, jeszcze nieznany, |steer_raw| ≥ cs_min_pct, geo;
+    kąt wymaga skalibrowanego montażu):
     |θ| < min_angle_deg (przyczepność – skręt w stronę zakrętu): ev += dt·znak(steer_raw·ω)
     θ ≥ learn_drift_deg (głęboki drift – kontra): ev −= dt·znak(steer_raw·ω)
     |ev| ≥ steer_learn_s → znak = znak(ev)
@@ -70,8 +72,8 @@ DEFAULT_DRIFT = dict(
     max_dt_s=0.2,          # [s] ograniczenie kroku (przerwa w zapisie)
     min_yaw_dps=30.0,      # [dps] poniżej – jazda prosto, bez driftu
     min_acc_g=0.3,         # [g] poniżej – kąt nieokreślony (bez skrętu: szum, ciasna jazda)
-    min_acc_cs_g=0.15,     # [g] jw., gdy kontra jest wymagana (skręt znany) – śliskie auto
-    min_v_mps=1.5,         # [m/s]
+    min_acc_cs_g=0.1,      # [g] jw., gdy kontra wymagana (skręt znany) – śliskie auto; też próg liczenia kąta
+    min_v_mps=0.5,         # [m/s] (driftowóz 25.10: ~0,25 g, ~180 °/s → ~0,8 m/s)
     v_max_mps=30.0,        # [m/s] ograniczenie prędkości z promienia
     min_angle_deg=15.0,    # [deg] kąt, od którego liczy się drift
     spin_angle_deg=80.0,   # [deg] powyżej przez spin_s = obrót
@@ -87,7 +89,8 @@ DEFAULT_DRIFT = dict(
     learn_drift_deg=30.0,  # [deg] drift tak głęboki, że skręt to na pewno kontra (nauka znaku)
     cs_min_pct=8.0,        # [%] skręt od neutrum uznany za kontrę
     cs_required=1,         # 1 = przy znanym skręcie drift wymaga kontry (albo dużego kąta)
-    angle_no_cs_deg=35.0,  # [deg] od tego kąta drift liczy się także bez kontry
+    angle_no_cs_deg=90.0,  # [deg] od tego kąta drift także bez kontry (90 = przy znanym skręcie kontra zawsze;
+                           #   jazda 25.10: 35° przepuszczało szum z jazdy z przyczepnością)
     full_bonus=0,          # 1 = bonus za pełny gaz w drifcie (przełącznik w profilu auta)
     full_thr_pct=95.0,     # [%] gaz uznany za pełny
     full_thr_s=1.0,        # [s] tak długo nieprzerwanie = pełny gaz (full_on)
@@ -107,7 +110,7 @@ def drift_init() -> dict:
         have_prev=False, p_af=0.0, p_al=0.0, p_r=0.0, quiet_t=0.0,
         have_bias=False, b_af=0.0, b_al=0.0, b_r=0.0,
         first=True, f_af=0.0, f_al=0.0, f_r=0.0,
-        corner=False, corner_t=0.0, r_prev=0.0, v=0.0, vdot=0.0, angle=0.0, spin_t=0.0,
+        geo=False, corner=False, corner_t=0.0, r_prev=0.0, v=0.0, vdot=0.0, angle=0.0, spin_t=0.0,
         steer_ev=0.0, steer_learned=0, steer=math.nan, cs=False, full_t=0.0, full_on=False,
         full_drift_t=0.0,
         in_drift=False, seg_t=0.0, seg_dir=0, seg_ok=False,
@@ -181,10 +184,12 @@ def drift_step(s: dict, p: dict, dt: float, a_fwd: float, a_left: float, r_dps: 
 
     amag = math.sqrt(fa * fa + fl * fl)
     rr = abs(fr)
-    corner = rr >= p["min_yaw_dps"] and amag >= (p["min_acc_cs_g"] if gate else p["min_acc_g"])
-    if corner:
+    # geo: kąt i V liczone od niższego progu (nauka skrętu, podgląd); corner: łuk do punktów
+    geo = rr >= p["min_yaw_dps"] and amag >= p["min_acc_cs_g"]
+    corner = geo and amag >= (p["min_acc_cs_g"] if gate else p["min_acc_g"])
+    if geo:
         v_raw = min(amag * G / math.radians(rr), p["v_max_mps"])
-        s["corner_t"] = s["corner_t"] + dt if s["corner"] else 0.0
+        s["corner_t"] = s["corner_t"] + dt if s["geo"] else 0.0
         if s["corner_t"] < p["steady_s"] - T_EPS:
             # początek łuku: próbki mieszane (hamowanie + skręt) – V bez filtra, bez pochodnej
             s["v"] = v_raw
@@ -209,12 +214,13 @@ def drift_step(s: dict, p: dict, dt: float, a_fwd: float, a_left: float, r_dps: 
         s["corner_t"] = 0.0
         angle = 0.0
         d = 0
+    s["geo"] = geo
     s["corner"] = corner
     s["r_prev"] = fr
     s["angle"] = angle
 
-    # nauka znaku skrętu (tylko automatycznie i dopóki nieznany)
-    if (not p["steer_sign"] and s["steer_learned"] == 0 and corner and not math.isnan(steer_raw)
+    # nauka znaku skrętu (tylko automatycznie i dopóki nieznany; próg śliskiego auta – geo)
+    if (not p["steer_sign"] and s["steer_learned"] == 0 and geo and not math.isnan(steer_raw)
             and abs(steer_raw) >= p["cs_min_pct"]):
         agree = 1.0 if steer_raw * fr > 0 else -1.0
         if abs(angle) < p["min_angle_deg"]:
