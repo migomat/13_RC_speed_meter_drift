@@ -28,7 +28,7 @@ typedef struct {
   float rest_da_g, rest_dr_dps, rest_min_s;
   float steady_yaw_acc_dps2, steady_s, max_dt_s;
   float min_yaw_dps, min_acc_g, min_acc_cs_g, min_v_mps, v_max_mps;
-  float min_angle_deg, spin_angle_deg, spin_s;
+  float min_angle_deg, spin_angle_deg, spin_s, spin_cooldown_s;
   float chain_gap_s, min_seg_s;
   float pts_per_m, pts_per_m_deg;
   int   max_mult;
@@ -58,6 +58,7 @@ typedef struct {
   float full_t;           /* czas nieprzerwanego pełnego gazu */
   int   full_on;          /* pełny gaz ≥ full_thr_s (bonus / dźwięk odcięcia) */
   float full_drift_t;
+  float cool_t;           /* po obrocie – bez nowego driftu */
   int   in_drift;
   float seg_t;
   int   seg_dir, seg_ok;

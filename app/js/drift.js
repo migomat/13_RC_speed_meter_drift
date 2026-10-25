@@ -25,8 +25,9 @@ export const DEFAULT_DRIFT = {
   min_v_mps: 0.5,         // [m/s] (driftowóz 25.10: ~0,25 g, ~180 °/s → ~0,8 m/s)
   v_max_mps: 30.0,        // [m/s]
   min_angle_deg: 15.0,    // [deg] kąt, od którego liczy się drift
-  spin_angle_deg: 80.0,   // [deg] powyżej przez spin_s = obrót
+  spin_angle_deg: 120.0,  // [deg] powyżej przez spin_s = obrót (kąty 80–120° to jeszcze drift)
   spin_s: 0.25,           // [s]
+  spin_cooldown_s: 1.0,   // [s] po obrocie bez nowego driftu
   chain_gap_s: 1.0,       // [s] przerwa, po której łańcuch jest zaliczany
   min_seg_s: 0.3,         // [s] minimalny segment (przekładka)
   pts_per_m: 10.0,        // punkty za metr driftu
@@ -57,7 +58,7 @@ export function driftInit() {
     have_bias: false, b_af: 0, b_al: 0, b_r: 0,
     first: true, f_af: 0, f_al: 0, f_r: 0,
     geo: false, corner: false, corner_t: 0, r_prev: 0, v: 0, vdot: 0, angle: 0, spin_t: 0,
-    steer_ev: 0, steer_learned: 0, steer: NaN, cs: false, full_t: 0, full_on: false, full_drift_t: 0,
+    steer_ev: 0, steer_learned: 0, steer: NaN, cs: false, full_t: 0, full_on: false, full_drift_t: 0, cool_t: 0,
     in_drift: false, seg_t: 0, seg_dir: 0, seg_ok: false,
     chain: false, chain_ok: false, prev_dir: 0, grace_t: 0,
     pts: 0, mult: 1, total: 0, best: 0, last: 0,
@@ -178,12 +179,14 @@ export function driftStep(s, p, dt, aFwd, aLeft, rDps, restHint, steerRaw = NaN,
 
   const st = s.steer;
   s.cs = corner && steerOk && Math.abs(st) >= p.cs_min_pct && ((st > 0) === (d < 0));
-  const drifting = corner && s.v >= p.min_v_mps && angle >= p.min_angle_deg && angle <= p.spin_angle_deg &&
+  s.cool_t = Math.max(0, s.cool_t - dt);
+  const drifting = corner && s.v >= p.min_v_mps && s.cool_t <= T_EPS && angle >= p.min_angle_deg && angle <= p.spin_angle_deg &&
     (!gate || s.cs || angle >= p.angle_no_cs_deg);
   s.spin_t = (corner && Math.abs(angle) > p.spin_angle_deg) ? s.spin_t + dt : 0;
   s.full_t = thrPct >= p.full_thr_pct ? s.full_t + dt : 0;
   s.full_on = s.full_t >= p.full_thr_s - T_EPS;
 
+  if (s.spin_t >= p.spin_s - T_EPS) s.cool_t = p.spin_cooldown_s;
   if (s.chain && s.spin_t >= p.spin_s - T_EPS) {
     if (p.spin_loses_chain) {
       s.n_lost += 1;

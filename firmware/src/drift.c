@@ -31,6 +31,7 @@ void drift_default_params(DriftParams* p) {
   p->min_angle_deg = DRIFT_MIN_ANGLE_DEG;
   p->spin_angle_deg = DRIFT_SPIN_ANGLE_DEG;
   p->spin_s = DRIFT_SPIN_S;
+  p->spin_cooldown_s = DRIFT_SPIN_COOLDOWN_S;
   p->chain_gap_s = DRIFT_CHAIN_GAP_S;
   p->min_seg_s = DRIFT_MIN_SEG_S;
   p->pts_per_m = DRIFT_PTS_PER_M;
@@ -177,13 +178,15 @@ void drift_step(DriftState* s, const DriftParams* p, float dt, float a_fwd, floa
 
   float st = s->steer;
   s->cs = corner && steer_ok && fabsf(st) >= p->cs_min_pct && ((st > 0.0f) == (d < 0));
-  int drifting = corner && s->v >= p->min_v_mps && angle >= p->min_angle_deg &&
+  s->cool_t = s->cool_t - dt > 0.0f ? s->cool_t - dt : 0.0f;
+  int drifting = corner && s->v >= p->min_v_mps && s->cool_t <= T_EPS && angle >= p->min_angle_deg &&
                  angle <= p->spin_angle_deg &&
                  (!gate || s->cs || angle >= p->angle_no_cs_deg);
   s->spin_t = (corner && fabsf(angle) > p->spin_angle_deg) ? s->spin_t + dt : 0.0f;
   s->full_t = thr_pct >= p->full_thr_pct ? s->full_t + dt : 0.0f;
   s->full_on = s->full_t >= p->full_thr_s - T_EPS;
 
+  if (s->spin_t >= p->spin_s - T_EPS) s->cool_t = p->spin_cooldown_s;
   if (s->chain && s->spin_t >= p->spin_s - T_EPS) {
     if (p->spin_loses_chain) {
       s->n_lost++;

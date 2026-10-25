@@ -50,8 +50,9 @@ drift:
   min_v_mps: 0.5            # [m/s]
   v_max_mps: 30             # [m/s]
   min_angle_deg: 15         # [deg] kąt, od którego liczy się drift
-  spin_angle_deg: 80        # [deg] powyżej przez spin_s = obrót
+  spin_angle_deg: 120       # [deg] powyżej przez spin_s = obrót
   spin_s: 0.25              # [s]
+  spin_cooldown_s: 1.0      # [s] po obrocie bez nowego driftu
   chain_gap_s: 1.0          # [s] przerwa, po której łańcuch jest zaliczany
   min_seg_s: 0.3            # [s] minimalny segment (przekładka)
   pts_per_m: 10             # punkty za metr driftu

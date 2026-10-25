@@ -19,7 +19,7 @@ limiter.setVolume(soundPref.volume);
 limiter.setTurbo(soundPref.turbo);
 function saveSoundPref() { try { localStorage.setItem('x4f_sound', JSON.stringify(soundPref)); } catch (e) { /* */ } }
 
-const APP_VERSION = '1.9.0';
+const APP_VERSION = '1.9.1';
 const $ = (id) => document.getElementById(id);
 const fmt = (v, d = 2) => (v == null || Number.isNaN(v) ? '–' : v.toFixed(d).replace('.', ','));
 
@@ -117,9 +117,11 @@ function goto(view) {
   if (LIVE_VIEWS.includes(view) && !wasLive) enterSpeed();
   if (view === 'drift') {
     $('drProfile').textContent = `profil: ${activeProfile().name}`;
-    $('drWarn').textContent = state.settings.mount_set ? '' :
+    $('drWarn').textContent = state.settings.axes_set ? '' :
       'Montaż nieskalibrowany – kąt driftu będzie błędny. Kilka spokojnych kółek bez driftu → Wyścigi → kalibracja montażu.';
-    show($('drWarn'), !state.settings.mount_set);
+    show($('drWarn'), !state.settings.axes_set);
+    const ax = state.settings.imu_axes;
+    $('drProfile').textContent = `profil: ${activeProfile().name} · montaż ${ax.forward} ${ax.left} ${ax.up}, ${fmt(state.settings.estimator.yaw_offset_deg, 1)}°`;
     if (state.live.data) renderDrift(state.live.data);
   }
   if (view === 'settings') renderSettings();
@@ -483,22 +485,22 @@ function onLive(m) {
 }
 
 // Montaż płytki z ustawień → Xiao (protokół ≥ 3; Xiao pamięta go do wyłączenia zasilania)
-// Profil, w którym nikt nie ustawiał montażu (kalibracja / ręcznie), przejmuje montaż, kierunek skrętu
-// i pełny gaz zapisane na Xiao pod tą samą nazwą – np. ustawione z komputera po analizie nagrania.
+// Profil, w którym nikt nie ustawiał osi montażu (kalibracja / ręcznie), przejmuje montaż zapisany na Xiao
+// pod tą samą nazwą – np. ustawiony z komputera po analizie nagrania. Kierunek skrętu tylko, gdy w profilu
+// „automatycznie”. Bez tego profil z domyślnymi osiami nadpisałby poprawny montaż na Xiao.
 async function adoptFromXiao() {
   const i = state.info;
-  if (!i || (i.proto || 1) < 7 || !i.mount || !i.mount_saved || state.settings.mount_set) return false;
+  if (!i || (i.proto || 1) < 7 || !i.mount || !i.mount_saved || state.settings.axes_set) return false;
   if (profileShowName(i.mount[5]) !== activeProfile().name) return false;
   const s = mergeSettings(state.settings);
   s.imu_axes = { forward: i.mount[0], left: i.mount[1], up: i.mount[2] };
   s.estimator.yaw_offset_deg = +i.mount[3] || 0;
-  s.drift.steer_sign = +i.mount[4] || 0;
+  if (!s.drift.steer_sign) s.drift.steer_sign = +i.mount[4] || 0;
   if (i.full_pct) s.drift.full_thr_pct = +i.full_pct;
   if (i.full_s !== undefined) s.drift.full_thr_s = +i.full_s;
-  s.drift.full_bonus = i.drift_bonus ? 1 : 0;
-  s.mount_set = true;
+  s.axes_set = true;
   await persistSettings(s);
-  toast('Przejęto z Xiao: montaż, kierunek skrętu i próg gazu');
+  toast(`Przejęto z Xiao montaż: ${i.mount[0]} ${i.mount[1]} ${i.mount[2]}, ${i.mount[3]}°`);
   return true;
 }
 
@@ -967,7 +969,7 @@ async function applyCalibration() {
   s.imu_axes = { ...cal.imu_axes };
   s.estimator.yaw_offset_deg = Math.round(cal.yaw_offset_deg * 10) / 10;
   if (cal.steer_sign) s.drift.steer_sign = cal.steer_sign;
-  s.mount_set = true;
+  s.axes_set = true;
   await persistSettings(s);
   await sendMount();
   show($('raceCalibApply'), false);
@@ -1173,8 +1175,8 @@ async function saveSettings() {
   s.drift.cs_required = $('setCsReq').checked ? 1 : 0;
   s.drift.full_bonus = $('setFullBonus').checked ? 1 : 0;
   const old = state.settings;
-  if (JSON.stringify(old.imu_axes) !== JSON.stringify(s.imu_axes) || old.estimator.yaw_offset_deg !== s.estimator.yaw_offset_deg ||
-      old.drift.steer_sign !== s.drift.steer_sign) s.mount_set = true;
+  // osie / kąt ustawione ręcznie – od teraz profil jest źródłem montażu (zmiana samego skrętu się nie liczy)
+  if (JSON.stringify(old.imu_axes) !== JSON.stringify(s.imu_axes) || old.estimator.yaw_offset_deg !== s.estimator.yaw_offset_deg) s.axes_set = true;
   if (DRIFT_FIELDS.some(([k]) => !(s.drift[k] >= 0))) { $('setMsg').textContent = 'Niepoprawne wartości punktów za drift.'; return; }
   const axesUsed = new Set(Object.values(s.imu_axes).map((a) => a[1]));
   if (axesUsed.size !== 3) { $('setMsg').textContent = 'Każda oś auta musi mieć inną oś płytki.'; return; }

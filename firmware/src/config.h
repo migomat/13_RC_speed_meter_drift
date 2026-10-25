@@ -7,8 +7,8 @@
 
 #define FW_VERSION_MAJOR    1
 #define FW_VERSION_MINOR    6
-#define FW_VERSION_PATCH    0
-#define FW_VERSION_STR      "1.6.0"
+#define FW_VERSION_PATCH    1
+#define FW_VERSION_STR      "1.6.1"
 
 // ---------------------------------------------------------------- hall
 // Tryb czujnika halla: 1 (tylko linia A) albo 3 (A/B/C).
@@ -169,8 +169,9 @@
 #define DRIFT_MIN_V_MPS             0.5f    // [m/s] (driftowóz: ~0,8 m/s w ciasnym torze)
 #define DRIFT_V_MAX_MPS             30.0f   // [m/s]
 #define DRIFT_MIN_ANGLE_DEG         15.0f   // [deg] kąt, od którego liczy się drift
-#define DRIFT_SPIN_ANGLE_DEG        80.0f   // [deg] powyżej przez DRIFT_SPIN_S = obrót
+#define DRIFT_SPIN_ANGLE_DEG        120.0f  // [deg] powyżej przez DRIFT_SPIN_S = obrót (80–120° to jeszcze drift)
 #define DRIFT_SPIN_S                0.25f   // [s]
+#define DRIFT_SPIN_COOLDOWN_S       1.0f    // [s] po obrocie bez nowego driftu
 #define DRIFT_CHAIN_GAP_S           1.0f    // [s] przerwa, po której łańcuch jest zaliczany
 #define DRIFT_MIN_SEG_S             0.3f    // [s] minimalny segment (przekładka)
 #define DRIFT_PTS_PER_M             10.0f   // punkty za metr driftu

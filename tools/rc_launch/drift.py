@@ -38,7 +38,7 @@ i gaz w neutrum, steer_raw = skręt [% od neutrum, znak surowy] albo NaN):
     |ev| ≥ steer_learn_s → znak = znak(ev)
  8. drift = łuk ∧ V ≥ min_v_mps ∧ min_angle_deg ≤ θ ≤ spin_angle_deg ∧
     (skręt nieznany ∨ ¬cs_required ∨ kontra ∨ θ ≥ angle_no_cs_deg)
-    obrót = łuk ∧ |θ| > spin_angle_deg przez spin_s
+    obrót = łuk ∧ |θ| > spin_angle_deg przez spin_s; potem spin_cooldown_s bez driftu
  9. pełny gaz: thr ≥ full_thr_pct nieprzerwanie → full_t += dt (inaczej 0); full_on = full_t ≥ full_thr_s;
     bonus (full_bonus = 1): punkty w drifcie × full_bonus_mult, gdy full_on (sygnał dla dźwięku: full_on)
 10. łańcuch (combo): segment driftu w jednym kierunku (s); segment potwierdzony po min_seg_s;
@@ -76,8 +76,9 @@ DEFAULT_DRIFT = dict(
     min_v_mps=0.5,         # [m/s] (driftowóz 25.10: ~0,25 g, ~180 °/s → ~0,8 m/s)
     v_max_mps=30.0,        # [m/s] ograniczenie prędkości z promienia
     min_angle_deg=15.0,    # [deg] kąt, od którego liczy się drift
-    spin_angle_deg=80.0,   # [deg] powyżej przez spin_s = obrót
+    spin_angle_deg=120.0,  # [deg] powyżej przez spin_s = obrót (jazda 25.10: kąty 80–120° to jeszcze drift)
     spin_s=0.25,           # [s]
+    spin_cooldown_s=1.0,   # [s] po obrocie bez nowego driftu (auto wytraca prędkość, kąt wraca przez próg)
     chain_gap_s=1.0,       # [s] przerwa w drifcie, po której łańcuch jest zaliczany
     min_seg_s=0.3,         # [s] minimalny czas segmentu (przekładka, potwierdzenie łańcucha)
     pts_per_m=10.0,        # punkty za metr driftu
@@ -112,7 +113,7 @@ def drift_init() -> dict:
         first=True, f_af=0.0, f_al=0.0, f_r=0.0,
         geo=False, corner=False, corner_t=0.0, r_prev=0.0, v=0.0, vdot=0.0, angle=0.0, spin_t=0.0,
         steer_ev=0.0, steer_learned=0, steer=math.nan, cs=False, full_t=0.0, full_on=False,
-        full_drift_t=0.0,
+        full_drift_t=0.0, cool_t=0.0,
         in_drift=False, seg_t=0.0, seg_dir=0, seg_ok=False,
         chain=False, chain_ok=False, prev_dir=0, grace_t=0.0,
         pts=0.0, mult=1, total=0.0, best=0.0, last=0.0,
@@ -232,13 +233,16 @@ def drift_step(s: dict, p: dict, dt: float, a_fwd: float, a_left: float, r_dps: 
 
     st = s["steer"]
     s["cs"] = bool(corner and steer_ok and abs(st) >= p["cs_min_pct"] and (st > 0) == (d < 0))
-    drifting = (corner and s["v"] >= p["min_v_mps"]
+    s["cool_t"] = max(0.0, s["cool_t"] - dt)
+    drifting = (corner and s["v"] >= p["min_v_mps"] and s["cool_t"] <= T_EPS
                 and p["min_angle_deg"] <= angle <= p["spin_angle_deg"]
                 and (not gate or s["cs"] or angle >= p["angle_no_cs_deg"]))
     s["spin_t"] = s["spin_t"] + dt if (corner and abs(angle) > p["spin_angle_deg"]) else 0.0
     s["full_t"] = s["full_t"] + dt if thr_pct >= p["full_thr_pct"] else 0.0
     s["full_on"] = s["full_t"] >= p["full_thr_s"] - T_EPS
 
+    if s["spin_t"] >= p["spin_s"] - T_EPS:
+        s["cool_t"] = p["spin_cooldown_s"]
     if s["chain"] and s["spin_t"] >= p["spin_s"] - T_EPS:
         if p["spin_loses_chain"]:
             s["n_lost"] += 1
