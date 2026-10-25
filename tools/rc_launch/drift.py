@@ -76,7 +76,7 @@ DEFAULT_DRIFT = dict(
     min_v_mps=0.5,         # [m/s] (driftowóz 25.10: ~0,25 g, ~180 °/s → ~0,8 m/s)
     v_max_mps=30.0,        # [m/s] ograniczenie prędkości z promienia
     min_angle_deg=15.0,    # [deg] kąt, od którego liczy się drift
-    spin_angle_deg=120.0,  # [deg] powyżej przez spin_s = obrót (jazda 25.10: kąty 80–120° to jeszcze drift)
+    spin_angle_deg=150.0,  # [deg] powyżej przez spin_s = obrót (kąty 80–120° to jeszcze drift; zapas na reverse entry)
     spin_s=0.25,           # [s]
     spin_cooldown_s=1.0,   # [s] po obrocie bez nowego driftu (auto wytraca prędkość, kąt wraca przez próg)
     chain_gap_s=1.0,       # [s] przerwa w drifcie, po której łańcuch jest zaliczany

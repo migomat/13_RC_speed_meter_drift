@@ -367,9 +367,9 @@ _EIGHTS = [
     (2.5, 4.0, 0.0, 0.0, 0.0, None),       # prosta – łańcuch zaliczony
     (0.5, 4.0, -25.0, 115.0, -15.0, None), # drugi łańcuch
     (2.0, 4.0, -25.0, 115.0, -15.0, 25.0),
-    (0.5, 2.5, -175.0, 115.0, -30.0, None),  # obrót – łańcuch stracony
-    (1.0, 0.0, -175.0, 0.0, 0.0, None),
-    (2.0, 0.0, -175.0, 0.0, 0.0, None),    # postój
+    (0.5, 2.5, -200.0, 115.0, -30.0, None),  # obrót (za 180°) – łańcuch stracony
+    (1.0, 0.0, -200.0, 0.0, 0.0, None),
+    (2.0, 0.0, -200.0, 0.0, 0.0, None),    # postój
 ]
 DRIFT_SCENARIOS = {
     "drift_eights": dict(seq=31, segments=_EIGHTS, steer_polarity=1,
