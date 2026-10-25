@@ -32,6 +32,8 @@ static volatile uint16_t s_rx_head, s_rx_tail;
 static bool s_vmax_reset, s_drift_reset, s_mount_changed;
 static bool s_phy_fast;   // żądane PHY 2M (pobieranie)
 static volatile uint16_t s_mtu = 23;
+static uint32_t s_conn_ms;          // chwila połączenia (ponowienie prośby o parametry)
+static uint8_t  s_param_tries;
 
 static void rxd_cb(uint16_t conn, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
   (void)conn; (void)chr;
@@ -54,6 +56,8 @@ static uint16_t clamp_mtu(uint16_t m) {
 
 static void connect_cb(uint16_t conn) {
   s_conn = conn;
+  s_conn_ms = millis();
+  s_param_tries = 0;
   BLEConnection* c = Bluefruit.Connection(conn);
   if (c) {
     s_mtu = clamp_mtu(c->getMtu());
@@ -61,7 +65,7 @@ static void connect_cb(uint16_t conn) {
     c->requestPHY(BLE_GAP_PHY_1MBPS);   // zasięg; 2M dopiero przy pobieraniu
     c->requestDataLengthUpdate();
     c->requestMtuExchange(BLE_MTU);
-    c->requestConnectionParameter(6);  // 7,5 ms
+    c->requestConnectionParameter(6, 0, BLE_SUP_TIMEOUT_MS / 10);  // 7,5 ms, nadzór 30 s
   }
 }
 
@@ -80,6 +84,7 @@ bool ble_begin(void) {
   Bluefruit.Periph.setConnectCallback(connect_cb);
   Bluefruit.Periph.setDisconnectCallback(disconnect_cb);
   Bluefruit.Periph.setConnIntervalMS(7, 15);
+  Bluefruit.Periph.setConnSupervisionTimeoutMS(BLE_SUP_TIMEOUT_MS);
 
   s_nus.begin();
   s_txd.setProperties(CHR_PROPS_NOTIFY);
@@ -104,6 +109,16 @@ bool ble_begin(void) {
 }
 
 bool ble_connected(void) { return s_conn != BLE_CONN_HANDLE_INVALID; }
+
+// Wynegocjowane parametry połączenia (diagnostyka: czy telefon przyjął 30 s nadzoru)
+static unsigned ble_sup_ms(void) {
+  BLEConnection* c = ble_connected() ? Bluefruit.Connection(s_conn) : nullptr;
+  return c ? c->getSupervisionTimeout() * 10u : 0u;
+}
+static float ble_interval_ms(void) {
+  BLEConnection* c = ble_connected() ? Bluefruit.Connection(s_conn) : nullptr;
+  return c ? c->getConnectionInterval() * 1.25f : 0.0f;
+}
 
 bool vmax_reset_requested(void) {
   bool r = s_vmax_reset;
@@ -306,7 +321,7 @@ static void cmd_status(Link& l) {
            "\"race_state\":\"%s\",\"races\":%d,\"races_unread\":%d,\"race_used\":%lu,"
            "\"race_size\":%lu,\"race_rec_s\":%lu,\"race_overflows\":%lu,\"race_scan_ms\":%lu,"
            "\"steer_us\":%u,\"steer_neutral_us\":%u,\"steer_learned\":%s,\"steer_pulses\":%lu,"
-           "\"steer_rejects\":%lu,\"steer_sign\":%d}",
+           "\"steer_rejects\":%lu,\"steer_sign\":%d,\"ble_sup_ms\":%u,\"ble_interval_ms\":%.2f}",
            logger_state_name(), throttle_neutral_us(), throttle_neutral_learned() ? "true" : "false",
            throttle_signal_ok(now) ? "true" : "false", throttle_tick_width(now),
            flash_count_runs() + (logger_ram_run_available() ? 1 : 0), flash_count_free(),
@@ -329,7 +344,7 @@ static void cmd_status(Link& l) {
            (unsigned long)race_current_s(), (unsigned long)race_overflows(),
            (unsigned long)race_scan_ms(), steering_tick_width(now), steering_neutral_us(),
            steering_neutral_learned() ? "true" : "false", (unsigned long)steering_pulse_count(),
-           (unsigned long)steering_reject_count(), g_live.d_steer_sign);
+           (unsigned long)steering_reject_count(), g_live.d_steer_sign, ble_sup_ms(), ble_interval_ms());
   send_text(l, s_out);
 }
 
@@ -611,6 +626,13 @@ void links_poll(uint32_t now_ms) {
   if (!ble_connected()) {
     s_ble.live = false;
   } else {
+    // Prośba z connect_cb bywa odrzucana (trwa zmiana PHY / MTU) – ponowienie co 2 s, do 3 razy
+    BLEConnection* pc = Bluefruit.Connection(s_conn);
+    if (pc && s_param_tries < 3 && now_ms - s_conn_ms >= 2000u * (s_param_tries + 1) &&
+        pc->getSupervisionTimeout() < BLE_SUP_TIMEOUT_MS / 10) {
+      s_param_tries++;
+      pc->requestConnectionParameter(6, 0, BLE_SUP_TIMEOUT_MS / 10);
+    }
     // MTU po wymianie (zadanie BLE aktualizuje obiekt połączenia)
     BLEConnection* c = Bluefruit.Connection(s_conn);
     if (c) s_mtu = clamp_mtu(c->getMtu());

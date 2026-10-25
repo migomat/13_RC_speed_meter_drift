@@ -167,6 +167,15 @@ Wibracja i napis przy przekładce, zaliczeniu łańcucha (+punkty) i obrocie.
 
 ## Zasięg BLE
 
+**Krótka utrata zasięgu nie zrywa połączenia (fw 1.5.1, aplikacja 1.8):** Xiao prosi o czas nadzoru
+połączenia 30 s (`BLE_SUP_TIMEOUT_MS`; wcześniej domyślne 2 s) i interwał 7,5 ms – prośba ponawiana
+2/4/6 s po połączeniu, bo ta z chwili połączenia bywa odrzucana (trwa zmiana PHY/MTU). Sprawdzone z
+laptopem (BlueZ): 30 000 ms i 7,5 ms przyjęte dopiero przy ponowieniu (wcześniej po cichu zostawało
+2 s i 30 ms). Wynegocjowane wartości w `STATUS`: `ble_sup_ms`, `ble_interval_ms` (telefon może
+przyjąć mniej). Gdy połączenie jednak padnie, aplikacja **łączy się ponownie sama** z tym samym Xiao
+(bez wybierania z listy, próby do skutku), wznawia LIVE, wysyła czas i profil; punkty liczy Xiao,
+więc nic nie ginie. „Rozłącz” wyłącza ponowne łączenie.
+
 TX już na maksimum nRF52840 (+8 dBm). Od fw 1.2 łącze pracuje na PHY 1M (ok. 3 dB lepsza czułość
 niż 2M), a 2M włącza się tylko na czas pobierania. Gdy zasięg spada do ~3 m przy pracującym
 wentylatorze, najpierw sprawdź przyczynę: wentylator odłączony vs. włączony (silnik stoi).

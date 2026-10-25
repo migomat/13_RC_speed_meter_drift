@@ -7,8 +7,8 @@
 
 #define FW_VERSION_MAJOR    1
 #define FW_VERSION_MINOR    5
-#define FW_VERSION_PATCH    0
-#define FW_VERSION_STR      "1.5.0"
+#define FW_VERSION_PATCH    1
+#define FW_VERSION_STR      "1.5.1"
 
 // ---------------------------------------------------------------- hall
 // Tryb czujnika halla: 1 (tylko linia A) albo 3 (A/B/C).
@@ -195,6 +195,9 @@
 // PHY 1M ma ok. 3 dB lepszą czułość niż 2M (zasięg na torze). 2M tylko na czas pobierania
 // (GET/RGET), powrót do 1M przy LIVE 1. 0 = zawsze 1M.
 #define BLE_PHY_2M_DOWNLOAD 1
+// [ms] czas nadzoru połączenia: tyle bez żadnego pakietu, zanim połączenie uznane za zerwane.
+// 30 s – auto za daleko na chwilę nie rozłącza się (maks. w BLE 32 s; telefon musi przyjąć).
+#define BLE_SUP_TIMEOUT_MS  30000
 
 // ---------------------------------------------------------------- format
 #define RUN_FORMAT_VERSION  1

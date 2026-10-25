@@ -70,16 +70,34 @@ export class WebBluetoothTransport {
     }
     this.device = dev;
     this.name = dev.name || 'X4F-LOG';
-    dev.addEventListener('gattserverdisconnected', () => this._onDisc());
-    const server = await dev.gatt.connect();
+    if (!this._listening) {
+      dev.addEventListener('gattserverdisconnected', () => this._onDisc());
+      this._listening = true;
+    }
+    await this._attach();
+  }
+
+  /** Ponowne połączenie z tym samym urządzeniem po utracie zasięgu – bez gestu użytkownika.
+   * Na Androidzie próba trwa do ~30 s, gdy urządzenie jest poza zasięgiem (potem wyjątek). */
+  async reconnect() {
+    if (!this.device) throw new TransportError('Brak urządzenia');
+    await this._attach();
+  }
+
+  async _attach() {
+    const server = await this.device.gatt.connect();
     const svc = await server.getPrimaryService(NUS_SERVICE);
     this.rx = await svc.getCharacteristic(NUS_RX);
     this.tx = await svc.getCharacteristic(NUS_TX);
-    this.tx.addEventListener('characteristicvaluechanged', (ev) => {
-      const v = ev.target.value;
-      this.frameCb(new Uint8Array(v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength)));
-    });
+    if (!this._onValue) {
+      this._onValue = (ev) => {
+        const v = ev.target.value;
+        this.frameCb(new Uint8Array(v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength)));
+      };
+    }
+    this.tx.addEventListener('characteristicvaluechanged', this._onValue);
     await this.tx.startNotifications();
+    this._q = Promise.resolve();
     this.connected = true;
   }
 
@@ -210,11 +228,19 @@ export class DemoTransport {
     this.discCb();
   }
 
-  /** Symulacja zerwania połączenia (test wznawiania pobierania). */
+  /** Symulacja utraty zasięgu na ~4 s (test wznawiania pobierania i ponownego łączenia). */
   dropConnection() {
     this.connected = false;
     this._stopLive();
+    this.outUntil = performance.now() + 4000;
     this.discCb();
+  }
+
+  /** Jak WebBluetoothTransport.reconnect(): próba ~1 s, poza „zasięgiem” – wyjątek. */
+  async reconnect() {
+    await sleep(1000);
+    if (performance.now() < (this.outUntil || 0)) throw new TransportError('Poza zasięgiem (demo)');
+    this.connected = true;
   }
 
   /** Nowa seria startów demo (jak kolejne starty nagrane przez Xiao). */

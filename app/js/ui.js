@@ -18,7 +18,7 @@ try { Object.assign(soundPref, JSON.parse(localStorage.getItem('x4f_sound') || '
 limiter.setVolume(soundPref.volume);
 function saveSoundPref() { try { localStorage.setItem('x4f_sound', JSON.stringify(soundPref)); } catch (e) { /* */ } }
 
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.8.0';
 const $ = (id) => document.getElementById(id);
 const fmt = (v, d = 2) => (v == null || Number.isNaN(v) ? '–' : v.toFixed(d).replace('.', ','));
 
@@ -49,6 +49,8 @@ const state = {
   cmpCharts: null,
   wakeLock: null,
   downloading: false,
+  userDisconnect: false,       // rozłączenie przyciskiem – bez automatycznego ponownego łączenia
+  reconnecting: false,
 };
 
 // ------------------------------------------------------------------ narzędzia UI
@@ -124,6 +126,8 @@ async function connect(kind, opts = {}) {
   $('connError').classList.add('hidden');
   try {
     if (state.transport) await disconnect();
+    state.userDisconnect = false;
+    state.reconnecting = false;
     const tr = kind === 'demo' ? new DemoTransport() : new WebBluetoothTransport();
     setChip('łączenie…', 'busy');
     await tr.connect(opts);
@@ -150,6 +154,8 @@ async function connect(kind, opts = {}) {
 }
 
 async function disconnect() {
+  state.userDisconnect = true;
+  state.reconnecting = false;
   const tr = state.transport;
   state.transport = null;
   state.device = null;
@@ -158,6 +164,12 @@ async function disconnect() {
 }
 
 function onDisconnected() {
+  // utrata zasięgu (nie przycisk „Rozłącz”) – próby ponownego połączenia z tym samym Xiao
+  if (!state.userDisconnect && state.transport && state.transport.reconnect) {
+    autoReconnect();
+    return;
+  }
+  state.userDisconnect = false;
   setChip('rozłączony', 'off');
   show($('btnDisconnect'), false);
   show($('demoTools'), false);
@@ -171,6 +183,43 @@ function onDisconnected() {
   if (state.downloading) $('dlText').textContent = 'Połączenie zerwane – pobieranie zostanie wznowione po ponownym połączeniu.';
   state.transport = null;
   state.device = null;
+}
+
+// Ponowne łączenie w pętli (próba na Androidzie trwa do ~30 s), aż do skutku albo „Rozłącz”.
+async function autoReconnect() {
+  if (state.reconnecting) return;
+  state.reconnecting = true;
+  const tr = state.transport;
+  const t0 = performance.now();
+  setChip('łączę ponownie…', 'busy');
+  $('connInfo').textContent = 'Utracono zasięg – łączę ponownie automatycznie…';
+  if (state.downloading) $('dlText').textContent = 'Połączenie zerwane – po ponownym połączeniu naciśnij „Pobierz wszystko” (wznowi od miejsca przerwania).';
+  let n = 0;
+  while (state.reconnecting && state.transport === tr && !state.userDisconnect) {
+    n++;
+    try {
+      await tr.reconnect();
+      if (!state.reconnecting || state.userDisconnect) { try { await tr.disconnect(); } catch (e) { /* */ } break; }
+      state.reconnecting = false;
+      setChip(tr.name, 'on');
+      $('connInfo').textContent = `Połączono ponownie z ${tr.name} (po ${Math.round((performance.now() - t0) / 1000)} s).`;
+      toast('Połączono ponownie');
+      try {
+        await state.device.setTime();
+        await refreshDevice();
+        await sendMount();
+        if (LIVE_VIEWS.includes(currentView) || $('liveToggle').checked) {
+          await state.device.live(true);
+          state.live.on = true;
+        }
+      } catch (e) { /* kolejne zerwanie – obsłuży onDisconnected */ }
+      return;
+    } catch (e) {
+      setChip(`łączę ponownie… (${n})`, 'busy');
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+  }
+  state.reconnecting = false;
 }
 
 async function refreshDevice() {
