@@ -55,6 +55,7 @@ referencyjną** algorytmów analizy.
 | D1 | hall A |
 | D2 | hall B (tylko tryb 3) |
 | D3 | hall C (tylko tryb 3) |
+| D7 | skręt z odbiornika / za żyroskopem (wersja drift, 10 kΩ szeregowo) |
 | GND | masa wspólna z ESC/odbiornikiem |
 
 Piny zdefiniować w `config.h`, nie na sztywno w kodzie.
@@ -677,7 +678,7 @@ z próbek wyścigu 20 Hz i wysyła w `LIVE` (tablica `d`); aplikacja tylko wyśw
   i test C `tools/drift_host`). Stałe: `DRIFT_*` = `config.yaml: drift` = ustawienia aplikacji.
 - Montaż płytki (osie + kąt w poziomie) decyduje o kącie driftu: kalibracja z nagrania jazdy bez
   driftu (`mount_calibrate` / `mountCalibrate`), wysyłana do Xiao komendą `MOUNT` (protokół 3).
-- Skręt (fw 1.3, D2, tylko `HALL_LINES == 1`): kontra potwierdza drift; kierunek skrętu automatycznie
+- Skręt (fw 1.3, pin D7 – osobny od halla, oba tryby `HALL_LINES`): kontra potwierdza drift; kierunek skrętu automatycznie
   (nauka w drift.c, kalibracja) albo ręcznie – nigdy nie zgadywać na stałe. Format wyścigu 2 (22 B).
 - Auto do driftu może nie mieć halla: nic w drifcie nie może wymagać zboczy (postój z IMU + gaz).
 - Profile aut (aplikacja 1.6): aktywny profil → `MOUNT … <nazwa>`; Xiao zapisuje go na stałe w `CFG_AREA`

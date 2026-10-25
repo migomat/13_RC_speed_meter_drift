@@ -3,7 +3,7 @@
 //
 // Rejestry CC:
 //   CC[0..2] – capture zboczy halla A/B/C (GPIOTE → PPI → CAPTURE);
-//              w trybie HALL_LINES == 1 CC[1] (PPI 1) = zbocza skrętu
+//              w trybie HALL_LINES == 1 CC[1] (PPI 1) = zbocza skrętu (pin D7)
 //   CC[3]    – capture zbocza gazu
 //   CC[4]    – compare: takt próbkowania SAMPLE_RATE_HZ
 //   CC[5]    – capture „teraz” (timebase_now)

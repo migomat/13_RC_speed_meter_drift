@@ -7,8 +7,8 @@
 
 #define FW_VERSION_MAJOR    1
 #define FW_VERSION_MINOR    4
-#define FW_VERSION_PATCH    0
-#define FW_VERSION_STR      "1.4.0"
+#define FW_VERSION_PATCH    1
+#define FW_VERSION_STR      "1.4.1"
 
 // ---------------------------------------------------------------- hall
 // Tryb czujnika halla: 1 (tylko linia A) albo 3 (A/B/C).
@@ -47,10 +47,11 @@
 #define PIN_HALL_A          D1
 #define PIN_HALL_B          D2      // tylko HALL_LINES == 3
 #define PIN_HALL_C          D3      // tylko HALL_LINES == 3
-// Skręt (serwo – sygnał ZA żyroskopem, jeśli jest): pin halla B, wolny w trybie HALL_LINES == 1.
-// Bez halla (auto do driftu): D1 zewrzeć do GND przez ~100 kΩ – wiszący pin daje fałszywe zbocza.
+// Skręt (serwo – sygnał ZA żyroskopem, jeśli jest): osobny pin D7 (P1.12, RX Serial1 – nieużywany),
+// niezależny od halla – ta sama płytka działa w aucie on-road (hall) i w driftowozie bez przelutowania.
+// Szeregowo 10 kΩ przy odczepie (jak gaz). Bez halla: D1 do GND przez ~100 kΩ (wiszący pin = zbocza).
 #define STEERING_ENABLED    1
-#define PIN_STEERING        D2
+#define PIN_STEERING        D7
 
 // ---------------------------------------------------------------- gaz
 #define THROTTLE_MIN_US             800    // [us] impulsy spoza zakresu odrzucane

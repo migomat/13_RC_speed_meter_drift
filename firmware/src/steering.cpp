@@ -5,7 +5,9 @@
 #include "timebase.h"
 
 #if STEERING_ENABLED
-static_assert(HALL_LINES == 1, "Skręt używa kanału CC/PPI halla B – tylko HALL_LINES == 1");
+// HALL_LINES == 1: znacznik czasu zbocza z CAPTURE (GPIOTE → PPI → CC[1], wolny po hallu B).
+// HALL_LINES == 3: wszystkie CC zajęte – znacznik czasu w przerwaniu (jitter rzędu µs; skręt
+// i tak uśredniany z 25 taktów, 1 % skrętu = 5 µs).
 
 static volatile uint32_t s_rise_t;
 static volatile bool     s_have_rise;
@@ -20,7 +22,11 @@ static uint32_t s_win_start_t, s_win_sum, s_win_n, s_win_last_pulse;
 static uint16_t s_win_min, s_win_max;
 
 static void isr_steering(void) {
+#if HALL_LINES == 1
   uint32_t t = timebase_captured(TB_CC_STEER);
+#else
+  uint32_t t = timebase_now();
+#endif
   if (nrf_gpio_pin_read(g_ADigitalPinMap[PIN_STEERING])) {
     s_rise_t = t;
     s_have_rise = true;
@@ -42,7 +48,11 @@ static void isr_steering(void) {
 bool steering_begin(void) {
   pinMode(PIN_STEERING, INPUT);
   attachInterrupt(PIN_STEERING, isr_steering, CHANGE);
+#if HALL_LINES == 1
   return timebase_connect_capture(PIN_STEERING, TB_CC_STEER, 1);
+#else
+  return true;
+#endif
 }
 
 uint16_t steering_tick_width(uint32_t t_tick) {

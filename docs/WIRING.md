@@ -11,6 +11,7 @@ z własnej LiPo 1S (pady BAT+/BAT−); z elektroniką auta łączy je tylko masa
 | D1 | P0.03 | hall A | dzielnik (patrz niżej) |
 | D2 | P0.28 | hall B | tylko `HALL_LINES = 3` |
 | D3 | P0.29 | hall C | tylko `HALL_LINES = 3` |
+| D7 | P1.12 | skręt (serwo; przy żyroskopie – przewód ZA żyroskopem) | 10 kΩ szeregowo przy odczepie; wersja drift (fw ≥ 1.4.1) |
 | GND | – | masa | z przewodu ESC → odbiornik |
 | BAT+ / BAT− | – | LiPo 1S 100–150 mAh | osobne zasilanie |
 
@@ -77,6 +78,15 @@ Stan wysoki na pinie ≈ 5 V · 68/(47+68) ≈ 3,0 V (próg „1” nRF52 ≈ 0,
 **ESC podciąga do 3,3 V:** tylko 10 kΩ szeregowo przy odczepie, bez rezystora do masy.
 
 **Gaz:** 10 kΩ szeregowo przy odczepie, bez rezystora do masy (sygnał odbiornika 3,3 V).
+
+**Skręt (D7):** tak samo jak gaz – 10 kΩ szeregowo przy odczepie (z przewodu sygnałowego serwa),
+bez rezystora do masy; masa wspólna z przewodu gazu. Rezystor chroni wyjście odbiornika/żyroskopu
+przy zwarciu przewodu i ogranicza prąd przez diody zabezpieczające pinu, gdyby sygnał miał 5 V.
+Po podłączeniu `STATUS`: `steer_us` ≈ 1500 i zmienia się przy kręceniu kierownicą,
+`steer_rejects` = 0 (inaczej serwo pracuje w trybie spoza 800–2200 µs).
+
+**Auto bez halla:** D1 zewrzeć do GND przez ~100 kΩ (albo zostawić 150 kΩ z dzielnika halla) –
+wiszący pin łapie zakłócenia jako fałszywe zbocza.
 
 ## Lutowanie do kabla (bez wtyczek)
 

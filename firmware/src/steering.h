@@ -1,4 +1,4 @@
-// Pomiar szerokości impulsu skrętu (PPI capture, jak gaz) i uczenie neutrum.
+// Pomiar szerokości impulsu skrętu (PIN_STEERING = D7; PPI capture jak gaz) i uczenie neutrum.
 // Kierunek „w lewo” rozpoznaje drift.c (nauka) albo kalibracja w aplikacji (MOUNT).
 #pragma once
 

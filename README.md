@@ -108,7 +108,9 @@ Wibracja i napis przy przekładce, zaliczeniu łańcucha (+punkty) i obrocie.
   więc jego kierunek w osiach auta daje kąt między osią auta a kierunkiem jazdy. Prędkość
   z promienia skrętu V = |a|/|ω| – działa **bez czujnika halla** (w drifcie koła i tak buksują).
   Przyspieszenie styczne (gaz/hamowanie w łuku) odejmowane, gdy łuk ustalony.
-* **Skręt (fw 1.3, opcjonalny):** sygnał serwa na D2 (pin halla B – wolny w trybie 1 linii halla).
+* **Skręt (fw 1.3, opcjonalny):** sygnał serwa na **D7** (osobny pin, fw 1.4.1 – wcześniej D2) przez
+  **10 kΩ szeregowo przy odczepie**, bez rezystora do masy (jak gaz); masa wspólna. Pin nie koliduje
+  z hallem (D1–D3), więc ta sama płytka działa w aucie on-road i w driftowozie bez przelutowania.
   **Kontra** (koła skręcone przeciwnie do obrotu auta) potwierdza drift: przy znanym skręcie drift
   poniżej 35° liczy się tylko z kontrą, za to próg przyspieszenia spada z 0,3 do 0,15 g (śliskie auto).
   **Kierunek skrętu** (normalny / odwrócony serwo) – automatycznie: Xiao uczy się w jeździe (zakręt
