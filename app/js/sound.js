@@ -163,10 +163,11 @@ export class LimiterSound {
     // strzały z wydechu: bez przesteru, „bang” 500–1500 Hz + trochę wysokich (trzask)
     this.popIn = ctx.createGain();
     this.popIn.gain.value = 1;
-    const pb = ctx.createBiquadFilter(); pb.type = 'bandpass'; pb.frequency.value = 380; pb.Q.value = 0.8;
-    const ph = ctx.createBiquadFilter(); ph.type = 'bandpass'; ph.frequency.value = 1400; ph.Q.value = 1.0;
-    const pg1 = ctx.createGain(); pg1.gain.value = 2.6;
-    const pg2 = ctx.createGain(); pg2.gain.value = 0.35;
+    // barwę strzału robią rezonanse w workletcie – tu tylko lekkie ograniczenie pasma
+    const pb = ctx.createBiquadFilter(); pb.type = 'lowpass'; pb.frequency.value = 2400; pb.Q.value = 0.6;
+    const ph = ctx.createBiquadFilter(); ph.type = 'highpass'; ph.frequency.value = 45;
+    const pg1 = ctx.createGain(); pg1.gain.value = 0.55;
+    const pg2 = ctx.createGain(); pg2.gain.value = 0.0;
     this.popIn.connect(pb); pb.connect(pg1); pg1.connect(this.master);
     this.popIn.connect(ph); ph.connect(pg2); pg2.connect(this.master);
     this.node = null;

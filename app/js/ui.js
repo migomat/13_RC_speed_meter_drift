@@ -19,7 +19,7 @@ limiter.setVolume(soundPref.volume);
 limiter.setTurbo(soundPref.turbo);
 function saveSoundPref() { try { localStorage.setItem('x4f_sound', JSON.stringify(soundPref)); } catch (e) { /* */ } }
 
-const APP_VERSION = '2.2.0';
+const APP_VERSION = '2.3.0';
 const $ = (id) => document.getElementById(id);
 const fmt = (v, d = 2) => (v == null || Number.isNaN(v) ? '–' : v.toFixed(d).replace('.', ','));
 

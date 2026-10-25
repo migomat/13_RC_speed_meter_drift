@@ -20,7 +20,6 @@ class EngineProcessor extends AudioWorkletProcessor {
     this.cyl = 0;
     this.envHi = 0;     // trzask zapłonu (krótki)
     this.envLo = 0;     // uderzenie ciśnienia w wydechu (dłuższe)
-    this.pop = 0;       // strzał z wydechu
     this.cutT = 0;      // czas w cyklu ogranicznika [s]
     this.seed = 22222;
     this.amp = [1, 0.72, 0.9, 0.8];    // nierówność cylindrów – bulgot zamiast czystego tonu
@@ -28,6 +27,28 @@ class EngineProcessor extends AudioWorkletProcessor {
     this.dcX = 0; this.dcY = 0;        // filtr składowej stałej (impulsy ciśnienia są jednokierunkowe)
     this.ph = 0;                       // faza warstw tonalnych (wycie dolotu, pomruk wału)
     this.howl = 0;                     // wygładzona głośność wycia
+    // strzał z wydechu = pobudzenie rezonansów rury (synteza modalna): huk + dzwonienie rury
+    this.modes = [[95, 0.040, 0.55], [310, 0.030, 0.75], [780, 0.014, 0.4]].map(([f, d, a]) => ({ f0: f, d, a, y1: 0, y2: 0, c1: 0, c2: 0, g: 0 }));
+    this.tuneModes();
+    this.click = 0;                    // krótki trzask na początku strzału
+    // ogranicznik: cykle o zmiennej długości, spadek obrotów w przerwie
+    this.cycLen = 0.072; this.cycOn = 0.046; this.dip = 0;
+  }
+
+  tuneModes() {
+    for (const m of this.modes) {
+      const f = m.f0 * (0.88 + 0.24 * this.rand());
+      const r = Math.exp(-1 / (m.d * sampleRate));
+      m.c1 = 2 * r * Math.cos(2 * Math.PI * f / sampleRate);
+      m.c2 = -r * r;
+      m.g = m.a * (1 - r);
+    }
+  }
+
+  firePop(a) {
+    this.tuneModes();
+    this.click += 0.5 * a;
+    this.popExc = a;
   }
 
   rand() {
@@ -43,7 +64,7 @@ class EngineProcessor extends AudioWorkletProcessor {
     const rpm = params.rpm[0], load = params.load[0], limit = params.limit[0] >= 0.5, crackle = params.crackle[0];
     const fire = rpm / 60 * 2;                       // zapłony na sekundę
     const kHi = Math.exp(-dt / 0.0005), kLo = Math.exp(-dt / (0.004 + 0.35 / fire));
-    const kPop = Math.exp(-dt / 0.009);   // dłuższy, niższy „bang” (krótki brzmiał jak zgniatana puszka)
+    const kClick = Math.exp(-dt / 0.0015);
     const strength = 0.25 + 0.75 * load;             // bez gazu cichy, „pusty” dźwięk
     // druga warstwa: tonalne „wycie” dolotu (zapłony + 2. i 3. harmoniczna) – od ~2500 rpm, z gazem;
     // trzecia: pomruk wału (pół-rząd, częstotliwość obrotu) – cały zakres
@@ -51,22 +72,32 @@ class EngineProcessor extends AudioWorkletProcessor {
     const howlT = (0.15 + 0.85 * load) * u * u * (3 - 2 * u) * (limit ? 0.8 : 1);
     const rumble = 0.10 + 0.12 * load;
     for (let i = 0; i < out.length; i++) {
-      this.phase += fire * (1 + this.jit) * dt;
-      if (limit) this.cutT = (this.cutT + dt) % 0.072; else this.cutT = 0;
+      const inCut = limit && this.cutT > this.cycOn;
+      // obroty spadają w przerwie zapłonów (do −6 %), po wznowieniu szybko wracają
+      this.dip += inCut ? (0.06 - this.dip) * dt / 0.02 : (0 - this.dip) * dt / 0.012;
+      this.phase += fire * (1 + this.jit) * (1 - this.dip) * dt;
+      if (limit) {
+        this.cutT += dt;
+        if (this.cutT >= this.cycLen) {          // nowy cykl ogranicznika – nierówna długość
+          this.cutT = 0;
+          this.cycLen = 0.060 + 0.025 * this.rand();
+          this.cycOn = this.cycLen * (0.55 + 0.15 * this.rand());
+        }
+      } else this.cutT = 0;
       if (this.phase >= 1) {
         this.phase -= 1;
         this.cyl = (this.cyl + 1) & 3;
         this.jit = (this.rand() - 0.5) * 0.06;     // ±3 % odstępu zapłonów
-        const cut = limit && this.cutT > 0.046;      // ogranicznik: 46 ms zapłonów, 26 ms przerwy
+        const cut = limit && this.cutT > this.cycOn;  // ogranicznik: przerwa w zapłonach
         if (!cut) {
           const a = this.amp[this.cyl] * strength * (0.9 + 0.2 * this.rand());
           this.envHi += 0.45 * a;
           this.envLo += a;
-        } else if (this.rand() < 0.03) {
-          this.pop += 0.8 + 0.8 * this.rand();       // niespalone paliwo na odcięciu – sporadyczny strzał
+        } else if (this.rand() < 0.025) {
+          this.firePop(0.5 + 0.6 * this.rand());     // niespalone paliwo na odcięciu – sporadyczny strzał
         }
         // strzały przy hamowaniu silnikiem: pojedyncze, z przerwami (seria krótkich trzasków = „puszka”)
-        if (crackle > 0 && !cut && this.pop < 0.05 && this.rand() < 0.06 * crackle) this.pop += 0.9 + 1.1 * this.rand();
+        if (crackle > 0 && !cut && Math.abs(this.modes[0].y1) < 0.02 && this.rand() < 0.06 * crackle) this.firePop(0.8 + 1.0 * this.rand());
       }
       const n = this.rand() * 2 - 1;
       this.ph += fire * dt;
@@ -74,16 +105,25 @@ class EngineProcessor extends AudioWorkletProcessor {
       this.howl += 0.0005 * (howlT - this.howl);
       const w = 2 * Math.PI * this.ph;
       const tone = Math.sin(w) + 0.55 * Math.sin(2 * w + 0.7) + 0.3 * Math.sin(3 * w + 1.9);
-      const gateOn = !(limit && this.cutT > 0.046);  // odcięcie przerywa też wycie
+      const gateOn = !(limit && this.cutT > this.cycOn);  // odcięcie przerywa też wycie
       const raw = (this.envHi * (0.5 + 0.5 * n) + this.envLo * (0.85 + 0.15 * n)) * 0.35 +
                   (gateOn ? this.howl * 0.16 * tone : 0) + rumble * 0.12 * Math.sin(w / 2) * (this.envLo + 0.2);
       this.dcY = raw - this.dcX + 0.997 * this.dcY;   // górnoprzepustowy ~20 Hz
       this.dcX = raw;
       out[i] = this.dcY;
-      if (outPop) outPop[i] = this.pop * n * 0.5; else out[i] += this.pop * n * 0.35;
+      // strzał: rezonanse pobudzone impulsem + krótki trzask szumu
+      const x = this.popExc || 0;
+      this.popExc = 0;
+      let pv = this.click * n * 0.6;
+      for (const m of this.modes) {
+        const y = m.c1 * m.y1 + m.c2 * m.y2 + m.g * x * 60;
+        m.y2 = m.y1; m.y1 = y;
+        pv += y;
+      }
+      this.click *= kClick;
+      if (outPop) outPop[i] = pv * 0.6; else out[i] += pv * 0.4;
       this.envHi *= kHi;
       this.envLo *= kLo;
-      this.pop *= kPop;
     }
     return true;
   }

@@ -158,6 +158,8 @@ Wibracja i napis przy przekładce, zaliczeniu łańcucha (+punkty) i obrocie.
   po puszczeniu gazu strzały z wydechu i turbina: gwizd sprężarki z doładowaniem, syk zaworu upustowego
   z „ćwierkaniem”. AudioWorklet (`engine-worklet.js`) składa dźwięk z pojedynczych zapłonów rzędowej czwórki,
   nieregularne odstępy zapłonów (bez „chiptune”), od ~2500 rpm druga warstwa – tonalne wycie dolotu (3 harmoniczne)
+  i pomruk wału; strzały z wydechu = synteza modalna (impuls pobudza 3 tłumione rezonanse rury ~95/310/780 Hz,
+  rozstrajane przy każdym strzale, + krótki trzask); ogranicznik: cykle o zmiennej długości i spadek obrotów w przerwie,
   i pomruk wału, filtr wydechu otwiera się z obrotami; strzały mają osobny tor bez przesteru, filtr DC.
   Sprawdzone offline (`LimiterSound.render`, podgląd WAV): obroty rosną z gazem
   dla 0/30/60/100 % gazu, modulacja odcięcia 14,1 Hz, strzały do 90× głośniejsze od wolnych obrotów.
