@@ -150,11 +150,16 @@ Wibracja i napis przy przekładce, zaliczeniu łańcucha (+punkty) i obrocie.
   liczy z ostatnim profilem, dopóki nie wybierzesz innego. Z drukowaną obudową / gniazdem o stałej
   orientacji kalibracja montażu wystarczy raz na auto. (Wewnętrzny flash z LittleFS odrzucony – zapis
   750–940 ms blokował pętlę pomiaru.)
-* **Bonus za pełny gaz (fw 1.5, aplikacja 1.7):** przełącznik w profilu auta – gaz ≥ 95 % nieprzerwanie
-  dłużej niż 1 s = punkty driftu ×1,5 (`DRIFT_FULL_*`, ten sam algorytm w C/Python/JS, wektor `drift_eights`
-  ma fazy pełnego gazu). **Dźwięk odcięcia**: telefon syntezuje (Web Audio, bez plików) wysokoobrotową
-  czwórkę na ograniczniku (~9000 rpm, odcinanie ~14 Hz, strzały z wydechu), gdy Xiao zgłasza pełny gaz;
-  włącznik 🔊 na zakładce Drift i w ustawieniach (ustawienie telefonu, nie profilu).
+* **Bonus za pełny gaz (fw 1.5–1.6):** przełącznik, próg (np. 65 % – auto ograniczone w aparaturze) i czas
+  w profilu auta (`DRIFT BONUS <0|1> <próg %> <czas s>`, zapisywane na Xiao) – pełny gaz dłużej niż czas =
+  punkty driftu ×1,5 (`DRIFT_FULL_*`, ten sam algorytm w C/Python/JS, wektor `drift_eights` ma fazy pełnego gazu).
+* **Dźwięk silnika jak w grach (aplikacja 2.0):** silnik gra cały czas (🔊 na zakładce Drift), obroty idą za
+  gazem z LIVE (wolne ~1400 → 9000 rpm przy progu pełnego gazu), na progu ogranicznik odcina zapłony (~14 Hz),
+  po puszczeniu gazu strzały z wydechu i turbina: gwizd sprężarki z doładowaniem, syk zaworu upustowego
+  z „ćwierkaniem”. AudioWorklet (`engine-worklet.js`) składa dźwięk z pojedynczych zapłonów rzędowej czwórki,
+  strzały mają osobny tor bez przesteru. Sprawdzone offline (`LimiterSound.render`): obroty 1400/4400/6650/8900 rpm
+  dla 0/30/60/100 % gazu, modulacja odcięcia 14,1 Hz, strzały do 90× głośniejsze od wolnych obrotów.
+  Własne nagrania: `app/sounds/limiter.mp3` (zamiast syntezy na odcięciu) i `blowoff.mp3`.
 * **Gdzie płytka:** jak najbliżej środka ciężkości (w aucie do driftu przesunięty do tyłu – wyznaczyć
   wagą: odległość od tylnej osi = rozstaw × masa przodu / masa całości, albo balansując auto na pręcie),
   na osi symetrii, płasko i sztywno. Płytka poza środkiem ciężkości mierzy kąt w swoim miejscu (z przodu

@@ -1,11 +1,13 @@
-// Dźwięk silnika na odcięciu + turbina – Web Audio.
+// Dźwięk silnika jak w grach – Web Audio.
 //
-// 1. Własne nagranie (pierwszeństwo): app/sounds/limiter.(mp3|ogg|wav) – zapętlany klip odcięcia,
-//    opcjonalnie app/sounds/blowoff.(mp3|ogg|wav) – zawór upustowy po puszczeniu gazu.
-// 2. Bez plików – synteza: odcięcie składane z pojedynczych zapłonów (rzędowa czwórka ~9000 rpm,
-//    zapłon co 3,3 ms), ogranicznik przerywa serię zapłonów ~14 razy na sekundę, strzały z wydechu,
-//    rezonans wydechu (filtry), turbina: gwizd sprężarki rosnący z doładowaniem i zawór upustowy
-//    z „ćwierkaniem” sprężarki (flutter) po puszczeniu gazu.
+// Silnik gra cały czas (gdy dźwięk włączony i jest sygnał z Xiao): obroty idą za gazem – mało gazu =
+// niskie obroty, pełny gaz (próg z profilu) = ogranicznik odcina zapłony. Po puszczeniu gazu: strzały
+// z wydechu (hamowanie silnikiem) i turbina – syk zaworu upustowego z „ćwierkaniem” sprężarki;
+// przy gazie gwizd sprężarki rosnący z doładowaniem.
+// Silnik: AudioWorklet (engine-worklet.js) składa dźwięk z pojedynczych zapłonów rzędowej czwórki,
+// za nim przester i rezonanse wydechu. Bez AudioWorklet – zapętlony klip odcięcia (synteza poniżej).
+// Własne nagrania: app/sounds/limiter.(mp3|ogg|wav) – zamiast syntezy na odcięciu,
+// app/sounds/blowoff.(mp3|ogg|wav) – zawór upustowy.
 // AudioContext można uruchomić tylko po geście użytkownika – unlock() z obsługi kliknięcia.
 
 const RPM = 9000;
@@ -92,14 +94,23 @@ function synthBlowoff(sr) {
   return out;
 }
 
+
+const IDLE_RPM = 1400;
+const REDLINE_RPM = 9000;
+const REV_UP = 9000;      // [rpm/s] narastanie obrotów (lekki silnik RC-owo-gierkowy)
+const REV_DOWN = 6000;    // [rpm/s] opadanie
+
 export class LimiterSound {
   constructor() {
     this.ctx = null;
-    this.on = false;
     this.volume = 0.6;
     this.turbo = true;
-    this.boost = 0;          // 0..1 – doładowanie (wolno narasta z gazem)
+    this.rpm = IDLE_RPM;
+    this.boost = 0;
     this.lastThr = 0;
+    this.crackle = 0;
+    this.active = false;
+    this.lastT = 0;
   }
 
   unlock() {
@@ -125,21 +136,51 @@ export class LimiterSound {
     this.ctx = ctx;
     const sr = ctx.sampleRate;
     this.master = ctx.createGain();
-    this.master.gain.value = this.volume;
+    this.master.gain.value = 0;
     this.master.connect(ctx.destination);
-    // odcięcie
+    const mk = (data) => { const b = ctx.createBuffer(1, data.length, sr); b.copyToChannel(data, 0); return b; };
+    this.boBuf = mk(synthBlowoff(sr));
+    if (!this.offline) this._loadFile('blowoff').then((b) => { if (b) this.boBuf = b; });
+    // tor wydechu: przester + rezonanse (dudnienie, chrapliwość, wycie dolotu)
+    this.engineIn = ctx.createGain();
+    const shaper = ctx.createWaveShaper();
+    const curve = new Float32Array(2048);
+    for (let i = 0; i < curve.length; i++) { const x = i / 1023.5 - 1; curve[i] = Math.tanh(2.5 * x); }
+    shaper.curve = curve;
+    this.engineIn.connect(shaper);
+    this.engineOut = ctx.createGain();
+    for (const [f, q, g] of [[300, 1.4, 1.0], [1100, 1.1, 0.7], [2700, 2.2, 0.35]]) {
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = q;
+      const gg = ctx.createGain(); gg.gain.value = g;
+      shaper.connect(bp); bp.connect(gg); gg.connect(this.engineOut);
+    }
+    this.engineOut.connect(this.master);
+    // strzały z wydechu: bez przesteru, „bang” 500–1500 Hz + trochę wysokich (trzask)
+    this.popIn = ctx.createGain();
+    this.popIn.gain.value = 1;
+    const pb = ctx.createBiquadFilter(); pb.type = 'bandpass'; pb.frequency.value = 850; pb.Q.value = 0.7;
+    const ph = ctx.createBiquadFilter(); ph.type = 'highpass'; ph.frequency.value = 2500;
+    const pg1 = ctx.createGain(); pg1.gain.value = 2.2;
+    const pg2 = ctx.createGain(); pg2.gain.value = 0.5;
+    this.popIn.connect(pb); pb.connect(pg1); pg1.connect(this.master);
+    this.popIn.connect(ph); ph.connect(pg2); pg2.connect(this.master);
+    this.node = null;
+    if (ctx.audioWorklet) {
+      this.ready = ctx.audioWorklet.addModule(this.workletUrl || 'js/engine-worklet.js').then(() => {
+        this.node = new AudioWorkletNode(ctx, 'x4f-engine', { numberOfOutputs: 2, outputChannelCount: [1, 1] });
+        this.node.connect(this.engineIn, 0);
+        this.node.connect(this.popIn, 1);
+      }).catch(() => this._fallback());
+    } else {
+      this._fallback();
+      this.ready = Promise.resolve();
+    }
+    // własny klip odcięcia
     this.limGain = ctx.createGain();
     this.limGain.gain.value = 0;
     this.limGain.connect(this.master);
-    const mk = (data) => { const b = ctx.createBuffer(1, data.length, sr); b.copyToChannel(data, 0); return b; };
-    this.limBuf = mk(synthLimiter(sr));
-    this.boBuf = mk(synthBlowoff(sr));
-    this.custom = false;
-    this._startLoop();
-    // własne nagrania (podmiana, gdy są)
-    this._loadFile('limiter').then((b) => { if (b) { this.limBuf = b; this.custom = true; this._startLoop(); } });
-    this._loadFile('blowoff').then((b) => { if (b) this.boBuf = b; });
-    // turbina: gwizd sprężarki (dwa bliskie tony – dudnienie), wysokość i głośność z doładowania
+    if (!this.offline) this._loadFile('limiter').then((b) => { if (b) this._startLimClip(b); });
+    // turbina: gwizd sprężarki
     this.turboGain = ctx.createGain();
     this.turboGain.gain.value = 0;
     this.turboGain.connect(this.master);
@@ -151,72 +192,120 @@ export class LimiterSound {
     });
   }
 
-  _startLoop() {
-    if (this.src) { try { this.src.stop(); } catch (e) { /* */ } }
-    const s = this.ctx.createBufferSource();
-    s.buffer = this.limBuf; s.loop = true;
-    s.connect(this.limGain); s.start();
-    this.src = s;
+  // Bez AudioWorklet: tylko zapętlony klip odcięcia
+  _fallback() {
+    const b = this.ctx.createBuffer(1, 1, this.ctx.sampleRate);
+    const data = synthLimiter(this.ctx.sampleRate);
+    const buf = this.ctx.createBuffer(1, data.length, this.ctx.sampleRate);
+    buf.copyToChannel(data, 0);
+    void b;
+    this.fallbackOnly = true;
+    this._startLimClip(buf);
   }
 
-  setVolume(v) {
-    this.volume = Math.max(0, Math.min(1, v));
-    if (this.master) this.master.gain.setTargetAtTime(this.volume, this.ctx.currentTime, 0.05);
+  _startLimClip(buf) {
+    if (this.limSrc) { try { this.limSrc.stop(); } catch (e) { /* */ } }
+    const s = this.ctx.createBufferSource();
+    s.buffer = buf; s.loop = true;
+    s.connect(this.limGain); s.start();
+    this.limSrc = s;
+    this.customLimiter = !this.fallbackOnly;
   }
+
+  setVolume(v) { this.volume = Math.max(0, Math.min(1, v)); }
 
   setTurbo(on) { this.turbo = !!on; if (!on && this.turboGain) this.turboGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05); }
 
   /**
-   * Wywoływane przy każdej linii LIVE (20 Hz): thrPct – gaz [%], fullPct – próg pełnego gazu z profilu,
-   * enabled – dźwięk włączony i jest sygnał. Odcięcie od razu po przekroczeniu progu.
+   * Przy każdej linii LIVE (20 Hz): thrPct – gaz [%], fullPct – próg pełnego gazu z profilu,
+   * enabled – dźwięk włączony i jest sygnał.
    */
-  update(thrPct, fullPct, enabled) {
+  update(thrPct, fullPct, enabled, atTime) {
     if (!this.ctx) return;
-    const t = this.ctx.currentTime;
-    const lim = enabled && thrPct >= fullPct;
-    if (lim !== this.on) {
-      this.on = lim;
-      this.limGain.gain.setTargetAtTime(lim ? 1 : 0, t, lim ? 0.015 : 0.04);
-    }
-    if (!this.turbo || !enabled) {
-      this.turboGain.gain.setTargetAtTime(0, t, 0.05);
-      this.boost = 0;
-      this.lastThr = enabled ? thrPct : 0;
+    const t = atTime ?? this.ctx.currentTime;
+    const dt = Math.min(0.2, Math.max(0.01, t - (this.lastT || t - 0.05)));
+    this.lastT = t;
+    if (!enabled) {
+      if (this.active) {
+        this.active = false;
+        this.master.gain.setTargetAtTime(0, t, 0.08);
+        this.turboGain.gain.setTargetAtTime(0, t, 0.05);
+        this.limGain.gain.setTargetAtTime(0, t, 0.05);
+      }
+      this.rpm = IDLE_RPM; this.boost = 0; this.lastThr = 0; this.crackle = 0;
       return;
     }
-    // doładowanie narasta z gazem (~0,6 s), opada szybciej
-    const target = Math.max(0, Math.min(1, thrPct / Math.max(fullPct, 1)));
-    this.boost += (target > this.boost ? 0.08 : 0.2) * (target - this.boost);
-    for (const [i, o] of this.whistle.entries()) o.frequency.setTargetAtTime((4800 + 3600 * this.boost) * (i ? 1.06 : 1), t, 0.08);
-    this.turboGain.gain.setTargetAtTime(0.10 * this.boost * this.boost, t, 0.08);
-    // zawór upustowy: szybkie puszczenie gazu przy dużym doładowaniu
-    if (this.lastThr - thrPct > 25 && this.boost > 0.45) this.blowoff(this.boost);
+    if (!this.active) { this.active = true; this.master.gain.setTargetAtTime(this.volume, t, 0.1); }
+    else this.master.gain.setTargetAtTime(this.volume, t, 0.05);
+    const x = Math.max(0, Math.min(1, thrPct / Math.max(fullPct, 1)));
+    // obroty za gazem, z ograniczoną szybkością zmian
+    const target = IDLE_RPM + (REDLINE_RPM - IDLE_RPM) * Math.pow(x, 0.8);
+    const step = (target > this.rpm ? REV_UP : REV_DOWN) * dt;
+    this.rpm += Math.max(-step, Math.min(step, target - this.rpm));
+    const limit = thrPct >= fullPct && this.rpm >= REDLINE_RPM * 0.97;
+    // puszczenie gazu przy wysokich obrotach: strzały z wydechu i upust turbiny
+    const drop = this.lastThr - thrPct;
+    if (drop > 20 && this.rpm > 4500) {
+      this.crackle = 1;
+      if (this.turbo && this.boost > 0.4) this.blowoff(this.boost, t);
+    }
+    this.crackle *= Math.exp(-dt / 0.45);
+    if (x > 0.3) this.crackle = 0;
     this.lastThr = thrPct;
+    if (this.node) {
+      const P = this.node.parameters;
+      P.get('rpm').setTargetAtTime(this.rpm, t, 0.03);
+      P.get('load').setTargetAtTime(x, t, 0.03);
+      P.get('limit').setValueAtTime(limit && !this.customLimiter ? 1 : 0, t);
+      P.get('crackle').setValueAtTime(this.crackle, t);
+      this.engineOut.gain.setTargetAtTime(limit && this.customLimiter ? 0 : 1, t, 0.02);
+    }
+    this.limGain.gain.setTargetAtTime(limit && (this.customLimiter || this.fallbackOnly) ? 1 : 0, t, 0.02);
+    // turbina: doładowanie narasta z gazem (~0,6 s), gwizd z doładowaniem
+    if (this.turbo) {
+      this.boost += (x > this.boost ? 0.08 : 0.25) * (x - this.boost);
+      for (const [i, o] of this.whistle.entries()) o.frequency.setTargetAtTime((4800 + 3600 * this.boost) * (i ? 1.06 : 1), t, 0.08);
+      this.turboGain.gain.setTargetAtTime(0.08 * this.boost * this.boost, t, 0.08);
+    } else {
+      this.boost = 0;
+    }
   }
 
-  blowoff(level = 1) {
-    if (!this.ctx || !this.turbo) return;
+  blowoff(level = 1, atTime) {
+    if (!this.ctx) return;
     const s = this.ctx.createBufferSource();
     s.buffer = this.boBuf;
     const g = this.ctx.createGain();
-    g.gain.value = 0.55 * level;
+    g.gain.value = 0.6 * level;
     s.connect(g); g.connect(this.master);
-    s.start();
+    s.start(atTime ?? 0);
     this.boost *= 0.3;
   }
 
-  /** Wyłączenie wszystkiego (wyjście z zakładki, brak sygnału). */
-  stop() { this.update(0, 100, false); this.lastThr = 0; }
+  stop() { this.update(0, 100, false); }
 
-  /** Test z ustawień: 2 s odcięcia, potem zawór upustowy. */
+  /** Podgląd offline (testy, plik WAV): profil gazu [%] co 50 ms → próbki mono. */
+  static async render(profile, { sampleRate = 44100, fullPct = 95, workletUrl } = {}) {
+    const n = Math.ceil((profile.length * 0.05 + 0.5) * sampleRate);
+    const ctx = new OfflineAudioContext(1, n, sampleRate);
+    const e = new LimiterSound();
+    e.offline = true;
+    e.workletUrl = workletUrl;
+    e._build(ctx);
+    await e.ready;
+    profile.forEach((thr, k) => e.update(thr, fullPct, true, k * 0.05 + 0.001));
+    const buf = await ctx.startRendering();
+    return buf.getChannelData(0);
+  }
+
+  /** Test z ustawień: wolne obroty → gaz → odcięcie → puszczenie (strzały, upust) → wolne. */
   demo() {
     if (!this.unlock()) return;
     let k = 0;
+    const prof = (k) => (k < 20 ? 0 : k < 40 ? 30 : k < 50 ? 60 : k < 90 ? 100 : k < 92 ? 40 : 0);
     const id = setInterval(() => {
-      k++;
-      const thr = k < 8 ? k * 12 : k < 48 ? 100 : 0;
-      this.update(thr, 95, true);
-      if (k > 60) { clearInterval(id); this.stop(); }
+      this.update(prof(k), 95, true);
+      if (++k > 140) { clearInterval(id); this.stop(); }
     }, 50);
   }
 }
