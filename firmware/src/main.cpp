@@ -13,6 +13,7 @@
 #include "imu.h"
 #include "led.h"
 #include "logger.h"
+#include "mount_store.h"
 #include "race.h"
 #include "run_format.h"
 #include "sim.h"
@@ -246,6 +247,7 @@ void setup() {
   s_imu_ok = imu_begin();
   s_flash_ok = flash_begin();
   race_begin();                    // po skanie slotów: wspólna numeracja seq / boot
+  mount_store_load();              // ostatni profil auta z aplikacji (QSPI) albo config.h
   drift_default_params(&s_dp);
   drift_init(&s_ds);
   race_set_sample_cb(on_race_sample);
@@ -268,6 +270,7 @@ void loop() {
   if (logger_state() != LS_SAVING) flash_poll();
   if (vmax_reset_requested()) s_es.v_max = 0.0f;
   if (drift_reset_requested()) drift_reset_score(&s_ds);
+  mount_store_poll(logger_busy() || race_recording());
   if (mount_changed()) {
     // bias i odniesienia liczone w starych osiach – od nowa
     float vmax = s_es.v_max;

@@ -141,10 +141,18 @@ Wibracja i napis przy przekładce, zaliczeniu łańcucha (+punkty) i obrocie.
   wyłączenia zasilania (po włączeniu połączyć telefon przed jazdą). Zmiana montażu zeruje filtry,
   punkty i nauczony znak skrętu.
   Salon 2026-10-24 (X4F FWD): do przodu +y, w lewo −x, kąt −18,5° (rozrzut 24° – ciasno i wolno).
-* **Gdzie płytka:** jak najbliżej środka masy (środek podwozia między osiami), płasko i sztywno.
-  Przy obrocie auta akcelerometr oddalony o d od środka masy mierzy dodatkowo ω²·d (wzdłuż) i
-  ε·d (w poprzek): przy 115 °/s i d = 10 cm to ok. 0,04 g ≈ 5° błędu kąta, a w przekładce (ε rzędu
-  20–40 rad/s²) 0,2–0,4 g – psuje wykrywanie przekładek. Każdy 1 cm ≈ 0,5°. Pianka montażowa OK,
+* **Profile aut (aplikacja 1.6, fw 1.4):** *Opcje → Profil auta* – każde auto ma własny komplet ustawień
+  (montaż i osie IMU, kierunek skrętu, przełożenie, opona, punkty za drift). Wybrany profil aplikacja
+  wysyła do Xiao (`MOUNT … <nazwa>`), a Xiao **zapisuje go na stałe** w ostatnim bloku 64 kB pamięci QSPI
+  (rekord 64 B w ~2 ms, bez kasowania; obszar wyścigów zmniejszony do 960 kB) – po resecie i bez telefonu
+  liczy z ostatnim profilem, dopóki nie wybierzesz innego. Z drukowaną obudową / gniazdem o stałej
+  orientacji kalibracja montażu wystarczy raz na auto. (Wewnętrzny flash z LittleFS odrzucony – zapis
+  750–940 ms blokował pętlę pomiaru.)
+* **Gdzie płytka:** jak najbliżej środka ciężkości (w aucie do driftu przesunięty do tyłu – wyznaczyć
+  wagą: odległość od tylnej osi = rozstaw × masa przodu / masa całości, albo balansując auto na pręcie),
+  na osi symetrii, płasko i sztywno. Płytka poza środkiem ciężkości mierzy kąt w swoim miejscu (z przodu
+  mniejszy, z tyłu większy): różnica ≈ ω·d / V – przy 115 °/s, d = 10 cm i 4 m/s ok. 3°; w przekładce
+  (ε rzędu 20–40 rad/s²) chwilowo 0,2–0,4 g zakłóceń. Pianka montażowa OK,
   byle płytka się nie przesuwała (inaczej kalibracja nieaktualna).
 * **Ograniczenia (do sprawdzenia na prawdziwym drifcie):** metoda zakłada w przybliżeniu ustaloną
   jazdę po łuku; progi i punkty da się stroić w aplikacji na nagraniach (przeliczenie wsteczne);

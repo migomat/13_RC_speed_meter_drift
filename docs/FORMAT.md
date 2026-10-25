@@ -85,7 +85,15 @@ F8 pobrany), `+12 długość`, `+16 CRC` (= crc32 startu). Dane startu od offset
 | Adres | Obszar |
 |---|---|
 | 0x000000–0x0FFFFF | 8 slotów startów po 128 kB (`FLASH_NUM_SLOTS`) – bufor pierścieniowy |
-| 0x100000–0x1FFFFF | obszar wyścigów 1 MB (`RACE_AREA_*`) – zapis po kolei, kasowanie w całości |
+| 0x100000–0x1EFFFF | obszar wyścigów 960 kB (`RACE_AREA_*`) – zapis po kolei, kasowanie w całości (fw ≤ 1.3: 1 MB) |
+| 0x1F0000–0x1FFFFF | profil auta 64 kB (`CFG_AREA_*`, fw 1.4) – rekordy 64 B dopisywane po kolei, obowiązuje ostatni poprawny |
+
+## Rekord profilu auta (64 B, `mount_store.cpp`)
+
+`u32 magic 0x4D463458 ("X4FM") | u16 wersja 1 | i8 idx[3] | i8 znak[3] | f32 yaw_deg | i8 znak skrętu |
+char nazwa[24] (UTF-8, zero na końcu) | 16 B zera | u32 crc32 (poprzednie 60 B)`.
+idx/znak: osie płytki dla forward/left/up (0=x, 1=y, 2=z; ±1). Zapis rekordu = programowanie bez kasowania;
+po 1024 zmianach blok kasowany w tle i zapis od początku. Brak poprawnego rekordu = wartości z `config.h`.
 
 # Format pliku wyścigu (wersja 2; wersja 1 nadal czytana)
 

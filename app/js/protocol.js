@@ -152,10 +152,11 @@ export class Device {
   vmaxReset() { return this.command('VMAX RESET'); }
   /** Punkty driftu i montaż (protokół ≥ 3). */
   driftReset() { return this.command('DRIFT RESET'); }
-  mount(axes, yawDeg, steerSign) {
+  mount(axes, yawDeg, steerSign, name) {
     if (!axes) return this.command('MOUNT');
     const st = steerSign === undefined ? '' : ` ${Math.trunc(steerSign) || 0}`;   // protokół ≥ 4
-    return this.command(`MOUNT ${axes.forward} ${axes.left} ${axes.up} ${(+yawDeg || 0).toFixed(1)}${st}`);
+    const nm = name === undefined || steerSign === undefined ? '' : ` ${name}`;     // protokół ≥ 5 (bez spacji)
+    return this.command(`MOUNT ${axes.forward} ${axes.left} ${axes.up} ${(+yawDeg || 0).toFixed(1)}${st}${nm}`);
   }
   arm() { return this.command('ARM'); }
 

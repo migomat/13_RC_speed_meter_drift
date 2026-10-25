@@ -10,7 +10,7 @@ import { syncedCharts, scatterChart, trackMap, PALETTE } from './charts.js';
 import { GitHubStore, syncAll } from './sync.js';
 import { driftScore, mountCalibrate, DRIFT_SUMMARY_LABELS } from './drift.js';
 
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.6.0';
 const $ = (id) => document.getElementById(id);
 const fmt = (v, d = 2) => (v == null || Number.isNaN(v) ? '–' : v.toFixed(d).replace('.', ','));
 
@@ -29,6 +29,9 @@ const state = {
   syncing: false,
   lastStatus: null,
   info: null,                  // INFO z urządzenia (proto, montaż)
+  profiles: [],                // profile aut [{id, name, settings}] (kv 'profiles')
+  profileId: null,             // aktywny profil (kv 'profile_active')
+  xiaoMount: null,             // co Xiao ma zapisane: [f, l, u, yaw, znak skrętu, nazwa] (+ saved)
   driftPrev: null,             // poprzednie liczniki driftu z LIVE (zdarzenia)
   calib: null,                 // wynik kalibracji montażu do zastosowania
   live: { on: false, last: 0, data: null },
@@ -101,7 +104,10 @@ function goto(view) {
   if (view === 'races') renderRacesList();
   if (view === 'compare') renderCompare();
   if (LIVE_VIEWS.includes(view) && !wasLive) enterSpeed();
-  if (view === 'drift' && state.live.data) renderDrift(state.live.data);
+  if (view === 'drift') {
+    $('drProfile').textContent = `profil: ${activeProfile().name}`;
+    if (state.live.data) renderDrift(state.live.data);
+  }
   if (view === 'settings') renderSettings();
 }
 
@@ -165,6 +171,7 @@ async function refreshDevice() {
   const [info, st, runs] = [await d.info(), await d.status(), await d.list()];
   state.lastStatus = st;
   state.info = info;
+  state.xiaoMount = info.mount ? { mount: info.mount, saved: !!info.mount_saved } : null;
   state.raceInfo = (info.proto || 1) >= 2 ? await d.rlist() : null;
   renderRaceDev(state.raceInfo);
   const racesNew = state.raceInfo ? state.raceInfo.races.filter((r) => !r.read).length : 0;
@@ -418,8 +425,24 @@ function onLive(m) {
 async function sendMount() {
   const d = state.device;
   if (!d || !state.info || (state.info.proto || 1) < 3) return;
-  const st = (state.info.proto || 1) >= 4 ? (state.settings.drift.steer_sign || 0) : undefined;
-  try { await d.mount(state.settings.imu_axes, state.settings.estimator.yaw_offset_deg, st); } catch (e) { toast(`Montaż: ${e.message}`); }
+  const proto = state.info.proto || 1;
+  const st = proto >= 4 ? (state.settings.drift.steer_sign || 0) : undefined;
+  const name = proto >= 5 ? profileWireName(activeProfile().name) : undefined;
+  try {
+    const r = await d.mount(state.settings.imu_axes, state.settings.estimator.yaw_offset_deg, st, name);
+    if (r && r.mount) state.xiaoMount = { mount: r.mount, saved: !!r.mount_saved };
+    if (r && r.mount && !r.mount_saved) {
+      // zapis na Xiao w następnej pętli (albo po nagrywaniu) – potwierdzenie chwilę później
+      setTimeout(async () => {
+        try {
+          const q = state.device && await state.device.mount();
+          if (q && q.mount) state.xiaoMount = { mount: q.mount, saved: !!q.mount_saved };
+          if (currentView === 'settings') renderProfiles();
+        } catch (e) { /* */ }
+      }, 400);
+    }
+  } catch (e) { toast(`Montaż: ${e.message}`); }
+  if (currentView === 'settings') renderProfiles();
 }
 
 const fmtPts = (v) => Math.round(v || 0).toLocaleString('pl-PL');
@@ -821,9 +844,7 @@ async function applyCalibration() {
   s.imu_axes = { ...cal.imu_axes };
   s.estimator.yaw_offset_deg = Math.round(cal.yaw_offset_deg * 10) / 10;
   if (cal.steer_sign) s.drift.steer_sign = cal.steer_sign;
-  state.settings = s;
-  state.analysisCache.clear();
-  await db.kvSet('settings', s);
+  await persistSettings(s);
   await sendMount();
   show($('raceCalibApply'), false);
   toast(state.device && (state.info?.proto || 1) >= 3 ? 'Montaż zapisany i wysłany do Xiao' : 'Montaż zapisany – trafi do Xiao po połączeniu');
@@ -983,6 +1004,7 @@ const EST_FIELDS = [
 ];
 
 function renderSettings() {
+  renderProfiles();
   const s = state.settings;
   $('setFdr').value = s.final_drive_ratio;
   $('setTire').value = s.front_tire_diameter_mm;
@@ -1024,9 +1046,7 @@ async function saveSettings() {
   const axesUsed = new Set(Object.values(s.imu_axes).map((a) => a[1]));
   if (axesUsed.size !== 3) { $('setMsg').textContent = 'Każda oś auta musi mieć inną oś płytki.'; return; }
   if (!(s.final_drive_ratio > 0 && s.front_tire_diameter_mm > 0 && s.lowpass_hz > 0 && s.race_lowpass_hz > 0)) { $('setMsg').textContent = 'Niepoprawne wartości.'; return; }
-  state.settings = s;
-  state.analysisCache.clear();
-  await db.kvSet('settings', s);
+  await persistSettings(s);
   await sendMount();
   $('setMsg').textContent = 'Zapisano – wszystkie starty zostaną przeliczone.';
   toast('Zapisano ustawienia');
@@ -1035,6 +1055,101 @@ async function saveSettings() {
 function applyTheme(t) {
   if (t === 'auto') document.documentElement.removeAttribute('data-theme');
   else document.documentElement.setAttribute('data-theme', t);
+}
+
+
+// ------------------------------------------------------------------ profile aut
+// Profil = komplet ustawień (auto, osie i montaż IMU, estymator, punkty driftu, kierunek skrętu).
+// Aktywny profil trafia do Xiao komendą MOUNT (montaż, znak skrętu, nazwa); Xiao zapisuje go
+// na stałe (protokół ≥ 5) – po resecie pamięta ostatni, dopóki nie wybierzesz innego.
+function activeProfile() { return state.profiles.find((p) => p.id === state.profileId) || state.profiles[0]; }
+
+// Nazwa do MOUNT: bez spacji (→ _), bez " i \, maks. 23 bajty UTF-8
+function profileWireName(name) {
+  let n = String(name || 'auto').trim().replace(/\s+/g, '_').replace(/["\\]/g, '');
+  const enc = new TextEncoder();
+  while (enc.encode(n).length > 23) n = n.slice(0, -1);
+  return n || 'auto';
+}
+const profileShowName = (wire) => String(wire || '').replace(/_/g, ' ');
+
+async function loadProfiles() {
+  let profiles = await db.kvGet('profiles');
+  let id = await db.kvGet('profile_active');
+  if (!Array.isArray(profiles) || !profiles.length) {
+    const saved = await db.kvGet('settings');      // przed profilami: jedne ustawienia
+    profiles = [{ id: newProfileId(), name: 'Moje auto', settings: mergeSettings(saved) }];
+    id = profiles[0].id;
+    await db.kvSet('profiles', profiles);
+    await db.kvSet('profile_active', id);
+  }
+  state.profiles = profiles.map((p) => ({ ...p, settings: mergeSettings(p.settings) }));
+  state.profileId = state.profiles.some((p) => p.id === id) ? id : state.profiles[0].id;
+  state.settings = activeProfile().settings;
+}
+
+function newProfileId() { return `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
+
+async function persistSettings(s) {
+  state.settings = s;
+  state.analysisCache.clear();
+  activeProfile().settings = s;
+  await db.kvSet('profiles', state.profiles);
+  await db.kvSet('settings', s);
+}
+
+async function selectProfile(id) {
+  if (!state.profiles.some((p) => p.id === id)) id = state.profiles[0].id;
+  state.profileId = id;
+  await db.kvSet('profile_active', id);
+  state.settings = activeProfile().settings;
+  state.analysisCache.clear();
+  await db.kvSet('settings', state.settings);
+  await sendMount();
+  renderSettings();
+}
+
+function renderProfiles() {
+  const sel = $('profSel');
+  sel.innerHTML = state.profiles.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+  sel.value = state.profileId;
+  $('profName').value = '';
+  $('profDelete').disabled = state.profiles.length < 2;
+  const xm = state.xiaoMount || (state.info && state.info.mount ? { mount: state.info.mount, saved: !!state.info.mount_saved } : null);
+  let txt;
+  if (!state.device) txt = 'Po połączeniu aplikacja wyśle ten profil do Xiao.';
+  else if (!state.info || (state.info.proto || 1) < 5) txt = 'Firmware Xiao nie zapamiętuje profilu (potrzebny fw 1.4) – montaż wysyłany przy każdym połączeniu.';
+  else if (xm) txt = `Xiao pamięta: „${profileShowName(xm.mount[5]) || '(bez nazwy)'}”${xm.saved ? ' – zapisany, zostaje po wyłączeniu' : ' – zapis w toku'}.`;
+  else txt = '';
+  $('profXiao').textContent = txt;
+}
+
+async function profileNew() {
+  const name = $('profName').value.trim() || `Auto ${state.profiles.length + 1}`;
+  const p = { id: newProfileId(), name, settings: mergeSettings(state.settings) };
+  state.profiles.push(p);
+  await db.kvSet('profiles', state.profiles);
+  await selectProfile(p.id);
+  toast(`Profil „${name}” – kopia ustawień poprzedniego; skalibruj montaż w nowym aucie`);
+}
+
+async function profileRename() {
+  const name = $('profName').value.trim();
+  if (!name) { toast('Wpisz nową nazwę w polu obok'); return; }
+  activeProfile().name = name;
+  await db.kvSet('profiles', state.profiles);
+  await sendMount();
+  renderProfiles();
+  toast('Zmieniono nazwę profilu');
+}
+
+async function profileDelete() {
+  if (state.profiles.length < 2) return;
+  const name = activeProfile().name;
+  state.profiles = state.profiles.filter((p) => p.id !== state.profileId);
+  await db.kvSet('profiles', state.profiles);
+  await selectProfile(state.profiles[0].id);
+  toast(`Usunięto profil „${name}”`);
 }
 
 // ------------------------------------------------------------------ synchronizacja (GitHub)
@@ -1100,6 +1215,7 @@ async function exportDb() {
   const races = await db.allRaces();
   const out = {
     app: 'x4f-launch-logger', version: 1, exported_at: new Date().toISOString(), settings: state.settings,
+    profiles: state.profiles, profile_active: state.profileId,
     recent_tags: await db.recentTags(),
     runs: runs.map((r) => ({ ...stripSync(r), raw: undefined, raw_b64: toBase64(new Uint8Array(r.raw)) })),
     races: races.map((r) => ({ ...stripSync(r), raw: undefined, raw_b64: toBase64(new Uint8Array(r.raw)) })),
@@ -1135,7 +1251,18 @@ async function importDb(file) {
         nr++;
       } catch (e) { bad++; }
     }
-    if (obj.settings) { state.settings = mergeSettings(obj.settings); await db.kvSet('settings', state.settings); state.analysisCache.clear(); }
+    if (Array.isArray(obj.profiles) && obj.profiles.length) {
+      for (const p of obj.profiles) {
+        if (!p || !p.id || !p.settings) continue;
+        const prof = { id: String(p.id), name: String(p.name || 'auto'), settings: mergeSettings(p.settings) };
+        const i = state.profiles.findIndex((x) => x.id === prof.id);
+        if (i >= 0) state.profiles[i] = prof; else state.profiles.push(prof);
+      }
+      await db.kvSet('profiles', state.profiles);
+      await selectProfile(state.profileId);
+    } else if (obj.settings) {
+      await persistSettings(mergeSettings(obj.settings));
+    }
     for (const t of (obj.recent_tags || []).reverse()) await db.pushRecentTag(t);
     $('dbMsg').textContent = `Zaimportowano ${n} startów i ${nr} wyścigów${bad ? `, odrzucono ${bad} uszkodzonych` : ''}.`;
     renderSettings();
@@ -1147,8 +1274,7 @@ async function importDb(file) {
 // ------------------------------------------------------------------ start aplikacji
 async function init() {
   applyTheme(localStorage.getItem('x4f_theme') || 'auto');
-  const saved = await db.kvGet('settings');
-  if (saved) state.settings = mergeSettings(saved);
+  await loadProfiles();
 
   document.querySelectorAll('nav.tabs button').forEach((b) => { b.onclick = () => goto(b.dataset.view); });
   $('btnConnect').onclick = () => connect('ble');
@@ -1189,6 +1315,10 @@ async function init() {
   $('raceCalib').onclick = () => calibrateFromRace();
   $('raceCalibApply').onclick = () => applyCalibration();
   $('setDriftSave').onclick = () => saveSettings();
+  $('profSel').onchange = (e) => selectProfile(e.target.value).then(() => toast(`Profil: ${activeProfile().name}`));
+  $('profNew').onclick = () => profileNew();
+  $('profRename').onclick = () => profileRename();
+  armedButton($('profDelete'), 'Na pewno usunąć?', () => profileDelete());
 
   $('runsFilter').onchange = () => renderRunsList();
   $('runBack').onclick = () => goto('runs');

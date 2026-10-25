@@ -654,7 +654,7 @@ progu stanu wysokiego).
 Drugi tryb pracy obok startów: **ciągły zapis całego wyścigu** (np. 6 min) do drugiej
 połowy flash. Szczegóły formatu: `docs/FORMAT.md`, komendy: `docs/PROTOCOL.md`, opis: `README.md`.
 
-- Flash: 8 slotów startów (1 MB) + obszar wyścigów 1 MB (`RACE_AREA_*`).
+- Flash: 8 slotów startów (1 MB) + obszar wyścigów 960 kB (`RACE_AREA_*`) + profil auta 64 kB (`CFG_AREA_*`).
 - Próbka `RACE_RATE_HZ` = 20 Hz (fw 1.2; fw 1.1: 50 Hz) (20 B, średnia z taktów 500 Hz). Wyścig zaczyna się sam
   (gaz > `RACE_START_PCT`, 1 s pre-trigger), kończy po `RACE_END_IDLE_S` postoju.
 - **Bez nadpisywania:** pełna pamięć = stop nagrywania wyścigów do skasowania z aplikacji.
@@ -680,6 +680,8 @@ z próbek wyścigu 20 Hz i wysyła w `LIVE` (tablica `d`); aplikacja tylko wyśw
 - Skręt (fw 1.3, D2, tylko `HALL_LINES == 1`): kontra potwierdza drift; kierunek skrętu automatycznie
   (nauka w drift.c, kalibracja) albo ręcznie – nigdy nie zgadywać na stałe. Format wyścigu 2 (22 B).
 - Auto do driftu może nie mieć halla: nic w drifcie nie może wymagać zboczy (postój z IMU + gaz).
+- Profile aut (aplikacja 1.6): aktywny profil → `MOUNT … <nazwa>`; Xiao zapisuje go na stałe w `CFG_AREA`
+  (ostatni blok QSPI, rekordy 64 B, `mount_store.cpp`) – zapis tylko poza nagrywaniem i bez blokowania.
 
 ## Synchronizacja (aplikacja 1.3)
 

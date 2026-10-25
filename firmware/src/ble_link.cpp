@@ -8,6 +8,7 @@
 #include "hall.h"
 #include "imu.h"
 #include "logger.h"
+#include "mount_store.h"
 #include "race.h"
 #include "run_format.h"
 #include "sim.h"
@@ -138,14 +139,17 @@ static void set_phy(bool fast) {
 static const char AXIS_CH[] = "xyz";
 
 static void mount_str(char* b, size_t n) {
-  snprintf(b, n, "\"mount\":[\"%c%c\",\"%c%c\",\"%c%c\",%.1f,%d]",
+  snprintf(b, n, "\"mount\":[\"%c%c\",\"%c%c\",\"%c%c\",%.1f,%d,\"%s\"],\"mount_saved\":%s",
            g_mount.sign[0] > 0 ? '+' : '-', AXIS_CH[g_mount.idx[0]],
            g_mount.sign[1] > 0 ? '+' : '-', AXIS_CH[g_mount.idx[1]],
            g_mount.sign[2] > 0 ? '+' : '-', AXIS_CH[g_mount.idx[2]], g_mount.yaw_deg,
-           g_mount.steer_sign);
+           g_mount.steer_sign, g_mount_name, mount_store_saved() ? "true" : "false");
+  size_t k = strlen(b);
+  snprintf(b + k, n - k, ",\"mount_save_us\":%lu", (unsigned long)mount_store_save_us());
 }
 
-// MOUNT <forward> <left> <up> <yaw_deg> [<znak skrętu 1/-1/0>], np. MOUNT +y -x +z -18.5 -1
+// MOUNT <forward> <left> <up> <yaw_deg> [<znak skrętu 1/-1/0> [<nazwa profilu>]],
+// np. MOUNT +y -x +z -18.5 -1 driftowóz (nazwa bez spacji – aplikacja zamienia je na '_')
 static bool parse_mount(char** argv, int argc, Mount* m) {
   for (int k = 0; k < 3; k++) {
     const char* a = argv[k];
@@ -161,6 +165,12 @@ static bool parse_mount(char** argv, int argc, Mount* m) {
   if (cyc * m->sign[0] * m->sign[1] != m->sign[2]) return false;
   m->yaw_deg = (float)atof(argv[3]);
   m->steer_sign = argc > 4 ? atoi(argv[4]) : g_mount.steer_sign;
+  if (argc > 5) {   // nazwa: bez cudzysłowu i ukośnika (trafia do JSON), UTF-8 dozwolone
+    size_t n = strlen(argv[5]);
+    if (n >= MOUNT_NAME_LEN) return false;
+    for (size_t i = 0; i < n; i++)
+      if ((uint8_t)argv[5][i] <= 0x20 || argv[5][i] == '"' || argv[5][i] == '\\') return false;
+  }
   if (m->steer_sign < -1 || m->steer_sign > 1) return false;
   return m->yaw_deg >= -180.0f && m->yaw_deg <= 180.0f;
 }
@@ -460,9 +470,9 @@ static void send_live(Link& l) {
 }
 
 static void handle_line(Link& l, char* line) {
-  char* argv[6];
+  char* argv[8];
   int argc = 0;
-  for (char* tok = strtok(line, " \t"); tok && argc < 6; tok = strtok(nullptr, " \t")) argv[argc++] = tok;
+  for (char* tok = strtok(line, " \t"); tok && argc < 8; tok = strtok(nullptr, " \t")) argv[argc++] = tok;
   if (argc == 0) return;
   const char* c = argv[0];
   auto U = [&](int i) -> uint32_t { return i < argc ? strtoul(argv[i], nullptr, 10) : 0; };
@@ -501,8 +511,16 @@ static void handle_line(Link& l, char* line) {
     if (argc >= 5) {
       Mount m;
       if (!parse_mount(argv + 1, argc - 1, &m)) return send_err(l, "BAD_MOUNT");
-      if (memcmp(&m, &g_mount, sizeof(m)) != 0) s_mount_changed = true;
+      bool geom = memcmp(m.idx, g_mount.idx, sizeof(m.idx)) || memcmp(m.sign, g_mount.sign, sizeof(m.sign)) ||
+                  m.yaw_deg != g_mount.yaw_deg || m.steer_sign != g_mount.steer_sign;
+      bool name = argc > 6 && strcmp(argv[6], g_mount_name) != 0;
+      if (geom) s_mount_changed = true;
       g_mount = m;
+      if (name) {
+        strncpy(g_mount_name, argv[6], MOUNT_NAME_LEN - 1);
+        g_mount_name[MOUNT_NAME_LEN - 1] = 0;
+      }
+      if (geom || name) mount_store_request_save();   // zapis na stałe, gdy nic się nie nagrywa
     }
     s_out[0] = '{';
     mount_str(s_out + 1, sizeof(s_out) - 3);

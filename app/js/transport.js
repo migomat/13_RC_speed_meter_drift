@@ -133,7 +133,7 @@ export class DemoTransport {
     this.driftRace = null;  // nagranie z driftem odtwarzane w LIVE (punkty jak na Xiao)
     this.drift = driftInit();
     this.driftI = 0;
-    this.mount = ['+x', '+y', '+z', 0, 0];
+    this.mount = ['+x', '+y', '+z', 0, 0, ''];
   }
 
   onFrame(cb) { this.frameCb = cb; }
@@ -255,7 +255,7 @@ export class DemoTransport {
     const [cmd, ...args] = text.trim().split(/\s+/);
     switch (cmd) {
       case 'INFO':
-        return this._text(JSON.stringify({ fw: '1.3.0-demo', format: 1, proto: 4, steer: 1, hall_lines: 1, pole_pairs: 1,
+        return this._text(JSON.stringify({ fw: '1.4.0-demo', format: 1, proto: 5, steer: 1, mount_saved: !!this.mount[5], hall_lines: 1, pole_pairs: 1,
           edges_per_rev: 2, slot_size: 131072, slots: 8, sample_rate: 500, get_block_max: 4096, name: this.name,
           race_rate: 20, race_area: 1048576, race_sample_size: 20, drift: 1, gyro_range: 1000, mount: this.mount }));
       case 'STATUS':
@@ -321,8 +321,8 @@ export class DemoTransport {
         return this._text('OK');
       case 'MOUNT':
         if (args.length >= 4) this.mount = [args[0], args[1], args[2], +parseFloat(args[3]).toFixed(1),
-          args.length >= 5 ? parseInt(args[4], 10) || 0 : this.mount[4]];
-        return this._text(JSON.stringify({ mount: this.mount }));
+          args.length >= 5 ? parseInt(args[4], 10) || 0 : this.mount[4], args.length >= 6 ? args[5] : this.mount[5]];
+        return this._text(JSON.stringify({ mount: this.mount, mount_saved: true }));
       case 'LIVE':
         if (args[0] === '1') this._startLive(); else this._stopLive();
         return this._text('OK');

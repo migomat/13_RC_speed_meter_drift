@@ -32,6 +32,7 @@ static_assert(RACE_AREA_SIZE % FLASH_ERASE_BLOCK == 0, "Obszar wyścigów = wiel
 // Bloki slotów mają pierwszeństwo.
 static int  s_race_erase_left;
 static bool s_race_erase_running;
+static bool s_cfg_erase_pending, s_cfg_erase_running;
 
 static inline uint32_t slot_addr(int i) { return (uint32_t)i * FLASH_SLOT_SIZE; }
 
@@ -172,6 +173,11 @@ void flash_poll(void) {
     s_race_erase_running = false;
     s_race_erase_left--;
   }
+  if (s_cfg_erase_running) {
+    if (wip()) return;
+    s_cfg_erase_running = false;
+    s_cfg_erase_pending = false;
+  }
   if (s_erase_running) {
     if (wip()) return;
     s_erase_running = false;
@@ -197,6 +203,12 @@ void flash_poll(void) {
   }
   if (s_race_erase_left > 0) {
     start_race_erase_block();
+    return;
+  }
+  if (s_cfg_erase_pending) {
+    s_transport.runCommand(0x06);  // WREN
+    s_transport.eraseCommand(0xD8, CFG_AREA_ADDR);
+    s_cfg_erase_running = true;
     return;
   }
   // Sprawdzanie pustości wolnych slotów po starcie (np. śmieci po innym
@@ -416,6 +428,22 @@ void flash_race_erase_start(void) {
 }
 
 bool flash_race_erasing(void) { return s_race_erase_left > 0; }
+
+static bool in_cfg(uint32_t off, uint32_t len) { return len <= CFG_AREA_SIZE && off <= CFG_AREA_SIZE - len; }
+
+bool flash_cfg_read(uint32_t off, void* buf, uint32_t len) {
+  if (!s_ok || !in_cfg(off, len)) return false;
+  wait_ready();
+  return s_flash.readBuffer(CFG_AREA_ADDR + off, (uint8_t*)buf, len) == len;
+}
+
+bool flash_cfg_write(uint32_t off, const void* data, uint32_t len) {
+  if (!s_ok || !in_cfg(off, len) || s_cfg_erase_pending || wip()) return false;
+  return s_flash.writeBuffer(CFG_AREA_ADDR + off, (const uint8_t*)data, len) == len;
+}
+
+void flash_cfg_erase_start(void) { if (s_ok) s_cfg_erase_pending = true; }
+bool flash_cfg_erasing(void) { return s_cfg_erase_pending; }
 
 void flash_note_seq(uint32_t seq) {
   if (seq != 0xFFFFFFFFu && seq >= s_next_seq) s_next_seq = seq + 1;

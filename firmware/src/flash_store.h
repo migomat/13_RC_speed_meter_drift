@@ -59,6 +59,11 @@ bool     flash_raw_read(uint32_t addr, void* buf, uint32_t len);
 bool     flash_raw_write(uint32_t addr, const void* data, uint32_t len);
 void     flash_race_erase_start(void);   // kasowanie całego obszaru w tle (flash_poll)
 bool     flash_race_erasing(void);
+// Obszar profilu (CFG_AREA_ADDR..+CFG_AREA_SIZE) – offsety względem początku obszaru.
+bool     flash_cfg_read(uint32_t off, void* buf, uint32_t len);
+bool     flash_cfg_write(uint32_t off, const void* data, uint32_t len);   // tylko gdy !flash_raw_busy()
+void     flash_cfg_erase_start(void);    // kasowanie bloku w tle (flash_poll)
+bool     flash_cfg_erasing(void);
 void     flash_note_seq(uint32_t seq);   // seq / boot_count z wyścigów (wspólna numeracja)
 void     flash_note_boot(uint32_t boot);
 // Test zaniku zasilania: reset w połowie zapisu danych

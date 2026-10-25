@@ -6,9 +6,9 @@
 #include <stdint.h>
 
 #define FW_VERSION_MAJOR    1
-#define FW_VERSION_MINOR    3
+#define FW_VERSION_MINOR    4
 #define FW_VERSION_PATCH    0
-#define FW_VERSION_STR      "1.3.0"
+#define FW_VERSION_STR      "1.4.0"
 
 // ---------------------------------------------------------------- hall
 // Tryb czujnika halla: 1 (tylko linia A) albo 3 (A/B/C).
@@ -106,9 +106,12 @@
 // Ciągły zapis całego wyścigu do drugiej części flash (bez nadpisywania):
 // kasowanie tylko w całości komendą RERASE z aplikacji, pełna pamięć = stop.
 #define RACE_AREA_ADDR      (FLASH_NUM_SLOTS * FLASH_SLOT_SIZE)
-#define RACE_AREA_SIZE      (FLASH_TOTAL_SIZE - RACE_AREA_ADDR)   // 1 MB
+// Ostatni blok 64 kB: profil auta (montaż, znak skrętu, nazwa) – rekordy dopisywane po kolei
+#define CFG_AREA_SIZE       FLASH_ERASE_BLOCK
+#define CFG_AREA_ADDR       (FLASH_TOTAL_SIZE - CFG_AREA_SIZE)
+#define RACE_AREA_SIZE      (CFG_AREA_ADDR - RACE_AREA_ADDR)       // 960 kB
 #define RACE_RATE_HZ        20      // [Hz] próbka = średnia z SAMPLE_RATE_HZ / RACE_RATE_HZ taktów
-                                    // (20 Hz: 1 MB ≈ 43 min; z tych próbek liczone są też punkty driftu)
+                                    // (20 Hz, 22 B: 960 kB ≈ 37 min; z tych próbek liczone są też punkty driftu)
 #define RACE_DECIM          (SAMPLE_RATE_HZ / RACE_RATE_HZ)
 #define RACE_PRETRIGGER_MS  3000    // [ms] zapis sprzed pierwszego gazu (≥ DRIFT_REST_MIN_S: bias
                                     // w przeliczeniu nagrania, także bez halla)
@@ -132,8 +135,8 @@
 #define IMU_AXIS_UP             2
 #define IMU_SIGN_UP             (+1)
 #define IMU_YAW_OFFSET_DEG      0.0f    // [deg] kąt montażu płytki w poziomie
-// Osie i kąt montażu można zmienić w działaniu komendą MOUNT (aplikacja wysyła wynik
-// kalibracji po połączeniu); wartości tutaj obowiązują po włączeniu zasilania.
+// Osie i kąt montażu zmienia komenda MOUNT (profil auta z aplikacji); Xiao zapisuje go
+// w QSPI (CFG_AREA, mount_store) – wartości tutaj tylko, gdy nic nie zapisano.
 #define ZUPT_MS                 200     // [ms] czas bezruchu do zerowania
 #define ZUPT_GYRO_DPS           4.0f    // [dps] maks. |ω| (po odjęciu biasu) w bezruchu
 #define ZUPT_ACC_G              0.06f   // [g] maks. ||a|_f − 1 g| w bezruchu (po filtrze)
@@ -191,9 +194,10 @@
 // ---------------------------------------------------------------- format
 #define RUN_FORMAT_VERSION  1
 #define RACE_FORMAT_VERSION 2       // 2: skręt w próbce (22 B) i neutrum skrętu w nagłówku
-#define PROTOCOL_VERSION    4       // 2: komendy wyścigów RLIST/RGET/RDEL/RERASE/RSTOP
+#define PROTOCOL_VERSION    5       // 2: komendy wyścigów RLIST/RGET/RDEL/RERASE/RSTOP
                                     // 3: punkty driftu w LIVE, DRIFT RESET, MOUNT
                                     // 4: skręt (LIVE "st", kontra i znak skrętu w "d", MOUNT … <znak>)
+                                    // 5: profil auta – MOUNT … <nazwa>, zapis na stałe (mount_saved)
 
 // ---------------------------------------------------------------- debug
 // Komendy SIM_* (syntetyczne zbocza/gaz) dostępne tylko przez USB.
