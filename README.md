@@ -162,6 +162,15 @@ Wibracja i napis przy przekładce, zaliczeniu łańcucha (+punkty) i obrocie.
   Sprawdzone offline (`LimiterSound.render`, podgląd WAV): obroty rosną z gazem
   dla 0/30/60/100 % gazu, modulacja odcięcia 14,1 Hz, strzały do 90× głośniejsze od wolnych obrotów.
   Własne nagrania: `app/sounds/limiter.mp3` (zamiast syntezy na odcięciu) i `blowoff.mp3`.
+* **Montaż – źródłem prawdy jest Xiao (aplikacja 2.1):** przy połączeniu aplikacja przejmuje montaż, kierunek
+  skrętu i pełny gaz z Xiao do profilu o tej samej nazwie; wysyła je tylko po świadomej zmianie (kalibracja, Opcje,
+  wybór / nazwa profilu – `mount_dirty`). Wcześniej profil z domyślnymi osiami nadpisywał poprawny montaż (dwie jazdy
+  25–26.10 bez punktów; z poprawnym montażem jazda 26.10: ~26 000 pkt, 13 przekładek, 1 obrót).
+* **Auto-korekta odchyłki montażu (fw 1.7):** płytka może się przestawiać między jazdami (26.10: o ~13°). Na wprost
+  z gazem / hamowaniem (|ω| < 8 °/s, koła prosto, |a| ≥ 0,06 g przez 0,3 s) przyspieszenie leży na osi auta – różnica
+  kierunku koryguje odchyłkę (stała czasowa 3 s takiej jazdy), Xiao dopisuje ją do zapisanego montażu po nagraniu.
+  Niezależne sprawdzenie: symetria kątów driftu lewo/prawo dała te same wartości (25.10: ~0°, 26.10: ~+13°).
+  Jazda w kółko bez prostych nie daje próbek – kilka przyspieszeń i hamowań na prostej na początku sesji wystarczy.
 * **Gdzie płytka:** jak najbliżej środka ciężkości (w aucie do driftu przesunięty do tyłu – wyznaczyć
   wagą: odległość od tylnej osi = rozstaw × masa przodu / masa całości, albo balansując auto na pręcie),
   na osi symetrii, płasko i sztywno. Płytka poza środkiem ciężkości mierzy kąt w swoim miejscu (z przodu

@@ -37,6 +37,8 @@ typedef struct {
   float steer_learn_s, learn_drift_deg, cs_min_pct;
   int   cs_required;
   float angle_no_cs_deg;
+  int   auto_yaw;
+  float ay_min_g, ay_max_dps, ay_steer_pct, ay_hold_s, ay_tau_s, ay_max_err_deg, ay_max_trim_deg;
   int   full_bonus;         /* 1 = bonus za pełny gaz w drifcie */
   float full_thr_pct, full_thr_s, full_bonus_mult;
 } DriftParams;
@@ -44,6 +46,7 @@ typedef struct {
 typedef struct {
   int   have_prev;
   float p_af, p_al, p_r, quiet_t;
+  float trim, straight_t, trim_t;   /* auto-korekta odchyłki montażu [deg], czas na wprost, czas korekty */
   int   have_bias;
   float b_af, b_al, b_r;
   int   first;

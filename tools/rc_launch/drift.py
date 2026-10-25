@@ -19,6 +19,10 @@ i gaz w neutrum, steer_raw = skręt [% od neutrum, znak surowy] albo NaN):
     przez rest_min_s (bez halla toczenie się bez gazu też jest „bez zboczy” – stąd czas)
     bias (af, al, ω) – średnia wykładnicza w postoju (bias_tau_s); pierwszy postój = wartość
  3. filtr IIR 1. rzędu (lpf_tau_s) af, al, ω; dt ograniczone do max_dt_s (przerwy w zapisie)
+ 3a. auto-korekta odchyłki montażu (auto_yaw): jazda na wprost (|ω| < ay_max_dps, skręt prosto albo
+    brak skrętu, |a| ≥ ay_min_g) dłużej niż ay_hold_s – przyspieszenie / hamowanie leży wtedy na osi auta;
+    err = atan2(al·sg, af·sg), sg = znak(af); |err| < ay_max_err_deg → trim += err·dt/ay_tau_s
+    (|trim| ≤ ay_max_trim_deg); krok 1 obraca o yaw_offset + trim
  4. skręt: znak = steer_sign (ustawiony / z kalibracji) albo nauczony (gdy steer_sign = 0);
     steer = steer_raw·znak (+ = w lewo); kontra = |steer| ≥ cs_min_pct ∧ znak(steer) = −znak(ω)
  5. geo: |ω| ≥ min_yaw_dps ∧ |a| ≥ min_acc_cs_g – liczony kąt i V (corner_t = czas od wejścia);
@@ -90,6 +94,14 @@ DEFAULT_DRIFT = dict(
     learn_drift_deg=30.0,  # [deg] drift tak głęboki, że skręt to na pewno kontra (nauka znaku)
     cs_min_pct=8.0,        # [%] skręt od neutrum uznany za kontrę
     cs_required=1,         # 1 = przy znanym skręcie drift wymaga kontry (albo dużego kąta)
+    auto_yaw=1,            # 1 = korekta odchyłki montażu w jeździe (płytka może się przestawiać)
+    ay_min_g=0.06,         # [g] min. przyspieszenie / hamowanie na wprost
+    ay_max_dps=8.0,        # [dps] maks. |ω| = jazda na wprost
+    ay_steer_pct=10.0,     # [%] maks. |skręt| = koła prosto
+    ay_hold_s=0.3,         # [s] tak długo na wprost, zanim próbki się liczą (bez przekładek)
+    ay_tau_s=3.0,          # [s] stała czasowa korekty (czasu jazdy na wprost z przyspieszeniem)
+    ay_max_err_deg=35.0,   # [deg] większa różnica – próbka pominięta (uderzenie, poślizg)
+    ay_max_trim_deg=45.0,  # [deg] maks. korekta
     angle_no_cs_deg=90.0,  # [deg] od tego kąta drift także bez kontry (90 = przy znanym skręcie kontra zawsze;
                            #   jazda 25.10: 35° przepuszczało szum z jazdy z przyczepnością)
     full_bonus=0,          # 1 = bonus za pełny gaz w drifcie (przełącznik w profilu auta)
@@ -108,7 +120,7 @@ def drift_params(cfg: dict) -> dict:
 
 def drift_init() -> dict:
     return dict(
-        have_prev=False, p_af=0.0, p_al=0.0, p_r=0.0, quiet_t=0.0,
+        have_prev=False, p_af=0.0, p_al=0.0, p_r=0.0, quiet_t=0.0, trim=0.0, straight_t=0.0, trim_t=0.0,
         have_bias=False, b_af=0.0, b_al=0.0, b_r=0.0,
         first=True, f_af=0.0, f_al=0.0, f_r=0.0,
         geo=False, corner=False, corner_t=0.0, r_prev=0.0, v=0.0, vdot=0.0, angle=0.0, spin_t=0.0,
@@ -145,7 +157,7 @@ def drift_step(s: dict, p: dict, dt: float, a_fwd: float, a_left: float, r_dps: 
     if dt <= 0:
         return
     dt = min(dt, p["max_dt_s"])
-    yaw = math.radians(p["yaw_offset_deg"])
+    yaw = math.radians(p["yaw_offset_deg"] + s["trim"])
     c, sn = math.cos(yaw), math.sin(yaw)
     af = a_fwd * c + a_left * sn
     al = -a_fwd * sn + a_left * c
@@ -177,6 +189,19 @@ def drift_step(s: dict, p: dict, dt: float, a_fwd: float, a_left: float, r_dps: 
         s["f_al"] += k * (al - s["f_al"])
         s["f_r"] += k * (r - s["f_r"])
     fa, fl, fr = s["f_af"], s["f_al"], s["f_r"]
+
+    amag0 = math.sqrt(fa * fa + fl * fl)
+    if (p["auto_yaw"] and abs(fr) < p["ay_max_dps"] and amag0 >= p["ay_min_g"]
+            and (math.isnan(steer_raw) or abs(steer_raw) < p["ay_steer_pct"])):
+        s["straight_t"] += dt
+        if s["straight_t"] >= p["ay_hold_s"] - T_EPS:
+            sg = 1.0 if fa >= 0 else -1.0
+            err = math.degrees(math.atan2(fl * sg, fa * sg))
+            if abs(err) < p["ay_max_err_deg"]:
+                s["trim"] = max(-p["ay_max_trim_deg"], min(p["ay_max_trim_deg"], s["trim"] + err * dt / p["ay_tau_s"]))
+                s["trim_t"] += dt
+    else:
+        s["straight_t"] = 0.0
 
     sgn = steer_sign_of(s, p)
     steer_ok = sgn != 0 and not math.isnan(steer_raw)
@@ -329,7 +354,7 @@ def drift_score(race, cfg: dict | None = None) -> dict:
     summary = dict(total=end["total"], best_chain=end["best"], chains=end["n_banks"],
                    transitions=s["n_trans"], spins=s["n_lost"], drift_time_s=s["drift_t"],
                    angle_max_deg=s["angle_max"], steer_sign=steer_sign_of(s, p),
-                   full_drift_s=s["full_drift_t"])
+                   full_drift_s=s["full_drift_t"], yaw_trim_deg=s["trim"], yaw_trim_time_s=s["trim_t"])
     out["t"] = race.t_s
     return dict(series=out, summary=summary)
 

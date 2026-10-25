@@ -323,7 +323,8 @@ static void cmd_status(Link& l) {
            "\"race_state\":\"%s\",\"races\":%d,\"races_unread\":%d,\"race_used\":%lu,"
            "\"race_size\":%lu,\"race_rec_s\":%lu,\"race_overflows\":%lu,\"race_scan_ms\":%lu,"
            "\"steer_us\":%u,\"steer_neutral_us\":%u,\"steer_learned\":%s,\"steer_pulses\":%lu,"
-           "\"steer_rejects\":%lu,\"steer_sign\":%d,\"ble_sup_ms\":%u,\"ble_interval_ms\":%.2f}",
+           "\"steer_rejects\":%lu,\"steer_sign\":%d,\"ble_sup_ms\":%u,\"ble_interval_ms\":%.2f,"
+           "\"yaw_trim\":%.1f}",
            logger_state_name(), throttle_neutral_us(), throttle_neutral_learned() ? "true" : "false",
            throttle_signal_ok(now) ? "true" : "false", throttle_tick_width(now),
            flash_count_runs() + (logger_ram_run_available() ? 1 : 0), flash_count_free(),
@@ -346,7 +347,8 @@ static void cmd_status(Link& l) {
            (unsigned long)race_current_s(), (unsigned long)race_overflows(),
            (unsigned long)race_scan_ms(), steering_tick_width(now), steering_neutral_us(),
            steering_neutral_learned() ? "true" : "false", (unsigned long)steering_pulse_count(),
-           (unsigned long)steering_reject_count(), g_live.d_steer_sign, ble_sup_ms(), ble_interval_ms());
+           (unsigned long)steering_reject_count(), g_live.d_steer_sign, ble_sup_ms(), ble_interval_ms(),
+           g_live.d_trim);
   send_text(l, s_out);
 }
 
@@ -467,20 +469,21 @@ static void cmd_rerase(Link& l, bool force) {
 }
 
 // Drift jako tablica "d" (kolejność: docs/PROTOCOL.md) – cała linia mieści się w jednej
-// notyfikacji BLE (≤ 243 B; najgorszy przypadek ok. 236 B), więc przy słabym zasięgu nie rozrywa
+// notyfikacji BLE (≤ 243 B; najgorszy przypadek ok. 240 B), więc przy słabym zasięgu nie rozrywa
 // się na kawałki. Dodając pole – policzyć długość z maksymalnymi wartościami.
 static void send_live(Link& l) {
   snprintf(s_out, sizeof(s_out),
            "{\"live\":1,\"v\":%.2f,\"v_max\":%.2f,\"v_front\":%.2f,\"slip\":%d,\"rpm\":%.0f,"
            "\"thr\":%u,\"thr_pct\":%.0f,\"ax\":%.3f,\"state\":\"%s\",\"race\":\"%s\","
-           "\"race_s\":%lu,\"st\":%.0f,\"d\":[%.0f,%d,%.0f,%.0f,%.0f,%.0f,%d,%d,%lu,%lu,%lu,%d,%d,%d]}",
+           "\"race_s\":%lu,\"st\":%.0f,\"d\":[%.0f,%d,%.0f,%.0f,%.0f,%.0f,%d,%d,%lu,%lu,%lu,%d,%d,%d,%.0f]}",
            g_live.v, g_live.v_max, g_live.v_front, g_live.spinning ? 1 : 0, g_live.rpm,
            g_live.throttle_us, g_live.throttle_pct, g_live.ax_g,
            logger_state_name(), race_state_name(), (unsigned long)race_current_s(),
            g_live.steer_valid ? g_live.steer_pct : 0.0f, g_live.d_pts, g_live.d_mult, g_live.d_total, g_live.d_last, g_live.d_best,
            g_live.d_angle, g_live.d_on ? 1 : 0, g_live.d_chain ? 1 : 0,
            (unsigned long)g_live.d_banks, (unsigned long)g_live.d_lost,
-           (unsigned long)g_live.d_trans, g_live.d_cs ? 1 : 0, g_live.d_steer_sign, g_live.d_full ? 1 : 0);
+           (unsigned long)g_live.d_trans, g_live.d_cs ? 1 : 0, g_live.d_steer_sign, g_live.d_full ? 1 : 0,
+           g_live.d_trim);
   if (!l.is_ble) return send_text(l, s_out);
   size_t n = strlen(s_out);
   if (n + 1 >= sizeof(s_out)) return;

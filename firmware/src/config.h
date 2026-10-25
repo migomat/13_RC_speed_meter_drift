@@ -6,9 +6,9 @@
 #include <stdint.h>
 
 #define FW_VERSION_MAJOR    1
-#define FW_VERSION_MINOR    6
-#define FW_VERSION_PATCH    2
-#define FW_VERSION_STR      "1.6.2"
+#define FW_VERSION_MINOR    7
+#define FW_VERSION_PATCH    0
+#define FW_VERSION_STR      "1.7.0"
 
 // ---------------------------------------------------------------- hall
 // Tryb czujnika halla: 1 (tylko linia A) albo 3 (A/B/C).
@@ -183,6 +183,18 @@
 #define DRIFT_LEARN_DRIFT_DEG       30.0f   // [deg] drift tak głęboki, że skręt = kontra
 #define DRIFT_CS_MIN_PCT            8.0f    // [%] skręt od neutrum uznany za kontrę
 #define DRIFT_CS_REQUIRED           1       // 1 = przy znanym skręcie drift wymaga kontry
+// Auto-korekta odchyłki montażu: na wprost z gazem / hamowaniem przyspieszenie leży na osi auta
+#define DRIFT_AUTO_YAW              1
+#define DRIFT_AY_MIN_G              0.06f   // [g]
+#define DRIFT_AY_MAX_DPS            8.0f    // [dps] = jazda na wprost
+#define DRIFT_AY_STEER_PCT          10.0f   // [%] = koła prosto
+#define DRIFT_AY_HOLD_S             0.3f    // [s]
+#define DRIFT_AY_TAU_S              3.0f    // [s] stała czasowa korekty
+#define DRIFT_AY_MAX_ERR_DEG        35.0f   // [deg]
+#define DRIFT_AY_MAX_TRIM_DEG       45.0f   // [deg]
+// Xiao dopisuje korektę do zapisanego montażu (MOUNT yaw), gdy ≥ 1° i zebrano ≥ 2 s jazdy na wprost
+#define DRIFT_AY_FOLD_DEG           1.0f
+#define DRIFT_AY_FOLD_MIN_S         2.0f
 #define DRIFT_ANGLE_NO_CS_DEG       90.0f   // [deg] od tego kąta drift także bez kontry (90 = zawsze kontra)
 #define DRIFT_FULL_BONUS            0       // bonus za pełny gaz – domyślnie wył. (profil: DRIFT BONUS 1)
 #define DRIFT_FULL_THR_PCT          95.0f   // [%] gaz uznany za pełny
@@ -203,12 +215,13 @@
 // ---------------------------------------------------------------- format
 #define RUN_FORMAT_VERSION  1
 #define RACE_FORMAT_VERSION 2       // 2: skręt w próbce (22 B) i neutrum skrętu w nagłówku
-#define PROTOCOL_VERSION    7       // 2: komendy wyścigów RLIST/RGET/RDEL/RERASE/RSTOP
+#define PROTOCOL_VERSION    8       // 2: komendy wyścigów RLIST/RGET/RDEL/RERASE/RSTOP
                                     // 3: punkty driftu w LIVE, DRIFT RESET, MOUNT
                                     // 4: skręt (LIVE "st", kontra i znak skrętu w "d", MOUNT … <znak>)
                                     // 5: profil auta – MOUNT … <nazwa>, zapis na stałe (mount_saved)
                                     // 6: bonus za pełny gaz – DRIFT BONUS 0|1, flaga full w "d"
                                     // 7: DRIFT BONUS 0|1 <próg %> <czas s> (pełny gaz konfigurowalny)
+                                    // 8: auto-korekta montażu – trim w "d" i yaw_trim w STATUS
 
 // ---------------------------------------------------------------- debug
 // Komendy SIM_* (syntetyczne zbocza/gaz) dostępne tylko przez USB.

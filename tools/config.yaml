@@ -65,3 +65,11 @@ drift:
   cs_min_pct: 8             # [%] skręt od neutrum uznany za kontrę
   cs_required: 1            # 1 = przy znanym skręcie drift wymaga kontry
   angle_no_cs_deg: 90       # [deg] od tego kąta drift także bez kontry (90 = zawsze kontra)
+  auto_yaw: 1               # korekta odchyłki montażu w jeździe (na wprost z gazem / hamowaniem)
+  ay_min_g: 0.06            # [g]
+  ay_max_dps: 8             # [dps]
+  ay_steer_pct: 10          # [%]
+  ay_hold_s: 0.3            # [s]
+  ay_tau_s: 3.0             # [s]
+  ay_max_err_deg: 35        # [deg]
+  ay_max_trim_deg: 45       # [deg]

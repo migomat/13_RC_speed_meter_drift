@@ -163,10 +163,10 @@ export class LimiterSound {
     // strzały z wydechu: bez przesteru, „bang” 500–1500 Hz + trochę wysokich (trzask)
     this.popIn = ctx.createGain();
     this.popIn.gain.value = 1;
-    const pb = ctx.createBiquadFilter(); pb.type = 'bandpass'; pb.frequency.value = 850; pb.Q.value = 0.7;
-    const ph = ctx.createBiquadFilter(); ph.type = 'highpass'; ph.frequency.value = 2500;
-    const pg1 = ctx.createGain(); pg1.gain.value = 2.2;
-    const pg2 = ctx.createGain(); pg2.gain.value = 0.5;
+    const pb = ctx.createBiquadFilter(); pb.type = 'bandpass'; pb.frequency.value = 380; pb.Q.value = 0.8;
+    const ph = ctx.createBiquadFilter(); ph.type = 'bandpass'; ph.frequency.value = 1400; ph.Q.value = 1.0;
+    const pg1 = ctx.createGain(); pg1.gain.value = 2.6;
+    const pg2 = ctx.createGain(); pg2.gain.value = 0.35;
     this.popIn.connect(pb); pb.connect(pg1); pg1.connect(this.master);
     this.popIn.connect(ph); ph.connect(pg2); pg2.connect(this.master);
     this.node = null;
@@ -250,10 +250,12 @@ export class LimiterSound {
     const limit = thrPct >= fullPct && this.rpm >= REDLINE_RPM * 0.97;
     // puszczenie gazu przy wysokich obrotach: strzały z wydechu i upust turbiny
     const drop = this.lastThr - thrPct;
-    if (drop > 20 && this.rpm > 4500) {
-      this.crackle = 1;
-      if (this.turbo && this.boost > 0.4) this.blowoff(this.boost, t);
+    // upust: każde wyraźne puszczenie gazu przy doładowaniu (z przerwą 0,6 s, żeby się nie dublował)
+    if (drop > 15 && this.turbo && this.boost > 0.25 && t - (this.lastBo || 0) > 0.6) {
+      this.lastBo = t;
+      this.blowoff(Math.max(0.7, this.boost), t);
     }
+    if (drop > 20 && this.rpm > 4500) this.crackle = 1;
     this.crackle *= Math.exp(-dt / 0.45);
     if (x > 0.3) this.crackle = 0;
     this.lastThr = thrPct;
@@ -285,7 +287,7 @@ export class LimiterSound {
     g.gain.value = 0.6 * level;
     s.connect(g); g.connect(this.master);
     s.start(atTime ?? 0);
-    this.boost *= 0.3;
+    this.boost *= 0.5;
   }
 
   stop() { this.update(0, 100, false); }

@@ -39,6 +39,14 @@ export const DEFAULT_DRIFT = {
   learn_drift_deg: 30.0,  // [deg] drift tak głęboki, że skręt = kontra
   cs_min_pct: 8.0,        // [%] skręt od neutrum uznany za kontrę
   cs_required: 1,         // 1 = przy znanym skręcie drift wymaga kontry (albo dużego kąta)
+  auto_yaw: 1,            // korekta odchyłki montażu w jeździe (na wprost z gazem / hamowaniem)
+  ay_min_g: 0.06,         // [g]
+  ay_max_dps: 8.0,        // [dps]
+  ay_steer_pct: 10.0,     // [%]
+  ay_hold_s: 0.3,         // [s]
+  ay_tau_s: 3.0,          // [s]
+  ay_max_err_deg: 35.0,   // [deg]
+  ay_max_trim_deg: 45.0,  // [deg]
   angle_no_cs_deg: 90.0,  // [deg] od tego kąta drift także bez kontry (90 = kontra zawsze przy znanym skręcie)
   full_bonus: 0,          // 1 = bonus za pełny gaz w drifcie (przełącznik w profilu)
   full_thr_pct: 95.0,     // [%] gaz uznany za pełny
@@ -54,7 +62,7 @@ export function driftParams(settings) {
 
 export function driftInit() {
   return {
-    have_prev: false, p_af: 0, p_al: 0, p_r: 0, quiet_t: 0,
+    have_prev: false, p_af: 0, p_al: 0, p_r: 0, quiet_t: 0, trim: 0, straight_t: 0, trim_t: 0,
     have_bias: false, b_af: 0, b_al: 0, b_r: 0,
     first: true, f_af: 0, f_al: 0, f_r: 0,
     geo: false, corner: false, corner_t: 0, r_prev: 0, v: 0, vdot: 0, angle: 0, spin_t: 0,
@@ -94,7 +102,7 @@ export function steerSignOf(s, p) { return p.steer_sign ? Math.trunc(p.steer_sig
 export function driftStep(s, p, dt, aFwd, aLeft, rDps, restHint, steerRaw = NaN, thrPct = 0) {
   if (dt <= 0) return;
   dt = Math.min(dt, p.max_dt_s);
-  const yaw = p.yaw_offset_deg * D2R;
+  const yaw = (p.yaw_offset_deg + s.trim) * D2R;
   const c = Math.cos(yaw), sn = Math.sin(yaw);
   let af = aFwd * c + aLeft * sn;
   let al = -aFwd * sn + aLeft * c;
@@ -129,6 +137,22 @@ export function driftStep(s, p, dt, aFwd, aLeft, rDps, restHint, steerRaw = NaN,
     s.f_r += k * (r - s.f_r);
   }
   const fa = s.f_af, fl = s.f_al, fr = s.f_r;
+
+  const amag0 = Math.sqrt(fa * fa + fl * fl);
+  if (p.auto_yaw && Math.abs(fr) < p.ay_max_dps && amag0 >= p.ay_min_g &&
+      (Number.isNaN(steerRaw) || Math.abs(steerRaw) < p.ay_steer_pct)) {
+    s.straight_t += dt;
+    if (s.straight_t >= p.ay_hold_s - T_EPS) {
+      const sg = fa >= 0 ? 1 : -1;
+      const err = Math.atan2(fl * sg, fa * sg) / D2R;
+      if (Math.abs(err) < p.ay_max_err_deg) {
+        s.trim = Math.max(-p.ay_max_trim_deg, Math.min(p.ay_max_trim_deg, s.trim + err * dt / p.ay_tau_s));
+        s.trim_t += dt;
+      }
+    }
+  } else {
+    s.straight_t = 0;
+  }
 
   const sgn = steerSignOf(s, p);
   const steerOk = sgn !== 0 && !Number.isNaN(steerRaw);
@@ -309,7 +333,7 @@ export function driftScore(race, settings) {
   bank(end);
   const summary = { total: end.total, best_chain: end.best, chains: end.n_banks, transitions: s.n_trans,
     spins: s.n_lost, drift_time_s: s.drift_t, angle_max_deg: s.angle_max, steer_sign: steerSignOf(s, p),
-    full_drift_s: s.full_drift_t };
+    full_drift_s: s.full_drift_t, yaw_trim_deg: s.trim, yaw_trim_time_s: s.trim_t };
   out.t = race.t_s;
   return { series: out, summary };
 }

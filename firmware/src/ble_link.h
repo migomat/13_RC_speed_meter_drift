@@ -23,6 +23,7 @@ struct LiveData {
   float    steer_pct;           // skręt [%] (+ = w lewo, gdy znak znany)
   bool     steer_valid;
   bool     d_full;              // pełny gaz ≥ DRIFT_FULL_THR_S (bonus, dźwięk odcięcia)
+  float    d_trim;              // [deg] bieżąca auto-korekta odchyłki montażu (jeszcze niedopisana)
 };
 // Montaż płytki (main.cpp): osie auta forward/left/up = oś płytki idx (0=x,1=y,2=z) · znak
 struct Mount {

@@ -19,7 +19,7 @@ limiter.setVolume(soundPref.volume);
 limiter.setTurbo(soundPref.turbo);
 function saveSoundPref() { try { localStorage.setItem('x4f_sound', JSON.stringify(soundPref)); } catch (e) { /* */ } }
 
-const APP_VERSION = '2.0.1';
+const APP_VERSION = '2.2.0';
 const $ = (id) => document.getElementById(id);
 const fmt = (v, d = 2) => (v == null || Number.isNaN(v) ? '–' : v.toFixed(d).replace('.', ','));
 
@@ -149,7 +149,7 @@ async function connect(kind, opts = {}) {
     $('connInfo').textContent = state.demo ? 'Tryb demo – wirtualne Xiao z syntetycznymi startami.' : `Połączono z ${tr.name}.`;
     await state.device.setTime();
     await refreshDevice();
-    await sendMount();
+    await syncMountOnConnect();
     if (LIVE_VIEWS.includes(currentView)) enterSpeed();
   } catch (e) {
     setChip('rozłączony', 'off');
@@ -213,7 +213,7 @@ async function autoReconnect() {
       try {
         await state.device.setTime();
         await refreshDevice();
-        await sendMount();
+        await syncMountOnConnect();
         if (LIVE_VIEWS.includes(currentView) || $('liveToggle').checked) {
           await state.device.live(true);
           state.live.on = true;
@@ -485,29 +485,43 @@ function onLive(m) {
 }
 
 // Montaż płytki z ustawień → Xiao (protokół ≥ 3; Xiao pamięta go do wyłączenia zasilania)
-// Profil, w którym nikt nie ustawiał osi montażu (kalibracja / ręcznie), przejmuje montaż zapisany na Xiao
-// pod tą samą nazwą – np. ustawiony z komputera po analizie nagrania. Kierunek skrętu tylko, gdy w profilu
-// „automatycznie”. Bez tego profil z domyślnymi osiami nadpisałby poprawny montaż na Xiao.
-async function adoptFromXiao() {
+// Montaż: źródłem prawdy jest Xiao (pamięta ostatni profil, poprawia odchyłkę w jeździe). Przy połączeniu
+// aplikacja PRZEJMUJE montaż z Xiao do profilu o tej samej nazwie; wysyła go tylko po świadomej zmianie
+// (kalibracja, Opcje, wybór / nazwa profilu) – profil ma wtedy mount_dirty, dopóki Xiao nie potwierdzi.
+// (Wcześniej aplikacja wysyłała profil przy każdym połączeniu i nadpisywała poprawny montaż domyślnymi osiami.)
+async function syncMountOnConnect() {
   const i = state.info;
-  if (!i || (i.proto || 1) < 7 || !i.mount || !i.mount_saved || state.settings.axes_set) return false;
-  if (profileShowName(i.mount[5]) !== activeProfile().name) return false;
+  if (!i || (i.proto || 1) < 7 || !i.mount || !i.mount_saved || state.settings.mount_dirty ||
+      profileShowName(i.mount[5]) !== activeProfile().name) {
+    return pushMount();
+  }
   const s = mergeSettings(state.settings);
+  const before = JSON.stringify([s.imu_axes, s.estimator.yaw_offset_deg, s.drift.steer_sign]);
   s.imu_axes = { forward: i.mount[0], left: i.mount[1], up: i.mount[2] };
   s.estimator.yaw_offset_deg = +i.mount[3] || 0;
-  if (!s.drift.steer_sign) s.drift.steer_sign = +i.mount[4] || 0;
+  s.drift.steer_sign = +i.mount[4] || 0;
   if (i.full_pct) s.drift.full_thr_pct = +i.full_pct;
   if (i.full_s !== undefined) s.drift.full_thr_s = +i.full_s;
-  s.axes_set = true;
+  s.drift.full_bonus = i.drift_bonus ? 1 : 0;
+  s.axes_set = s.axes_set || before !== JSON.stringify([s.imu_axes, s.estimator.yaw_offset_deg, s.drift.steer_sign]) ||
+    i.mount[0] !== '+x' || i.mount[1] !== '+y' || +i.mount[3] !== 0;
   await persistSettings(s);
-  toast(`Przejęto z Xiao montaż: ${i.mount[0]} ${i.mount[1]} ${i.mount[2]}, ${i.mount[3]}°`);
-  return true;
+  state.xiaoMount = { mount: i.mount, saved: true };
+  if (before !== JSON.stringify([s.imu_axes, s.estimator.yaw_offset_deg, s.drift.steer_sign])) {
+    toast(`Montaż z Xiao: ${i.mount[0]} ${i.mount[1]} ${i.mount[2]}, ${i.mount[3]}°, skręt ${+i.mount[4] > 0 ? 'normalny' : +i.mount[4] < 0 ? 'odwrócony' : 'auto'}`);
+  }
+  if (currentView === 'settings') renderSettings();
 }
 
-async function sendMount() {
+/** Zaznacza zmianę montażu w aktywnym profilu (wyślij przy najbliższej okazji) i wysyła, jeśli połączono. */
+async function markMountDirty() {
+  if (!state.settings.mount_dirty) { const s = mergeSettings(state.settings); s.mount_dirty = true; await persistSettings(s); }
+  await pushMount();
+}
+
+async function pushMount() {
   const d = state.device;
   if (!d || !state.info || (state.info.proto || 1) < 3) return;
-  await adoptFromXiao();
   const proto = state.info.proto || 1;
   const st = proto >= 4 ? (state.settings.drift.steer_sign || 0) : undefined;
   const name = proto >= 5 ? profileWireName(activeProfile().name) : undefined;
@@ -517,6 +531,7 @@ async function sendMount() {
     const dr = state.settings.drift;
     if (proto >= 7) await d.driftBonus(!!dr.full_bonus, dr.full_thr_pct, dr.full_thr_s);
     else if (proto >= 6) await d.driftBonus(!!dr.full_bonus);
+    if (state.settings.mount_dirty) { const s = mergeSettings(state.settings); s.mount_dirty = false; await persistSettings(s); }
     if (r && r.mount && !r.mount_saved) {
       // zapis na Xiao w następnej pętli (albo po nagrywaniu) – potwierdzenie chwilę później
       setTimeout(async () => {
@@ -573,6 +588,11 @@ function renderDrift(m) {
   limiter.update(m.thr_pct || 0, state.settings.drift.full_thr_pct, soundPref.on);
   show($('drCs'), m.d_cs !== undefined);
   renderSteer(m);
+  if (m.d_trim !== undefined) {
+    const ax = state.settings.imu_axes;
+    $('drProfile').textContent = `profil: ${activeProfile().name} · montaż ${ax.forward} ${ax.left} ${ax.up}, ` +
+      `${fmt(state.settings.estimator.yaw_offset_deg, 1)}°` + (Math.abs(m.d_trim) >= 0.5 ? ` · korekta w jeździe ${m.d_trim > 0 ? '+' : ''}${Math.round(m.d_trim)}°` : '');
+  }
 }
 
 // Podgląd skrętu: „+” = w lewo po uwzględnieniu kierunku (Xiao: znak z profilu albo nauczony).
@@ -971,7 +991,7 @@ async function applyCalibration() {
   if (cal.steer_sign) s.drift.steer_sign = cal.steer_sign;
   s.axes_set = true;
   await persistSettings(s);
-  await sendMount();
+  await markMountDirty();
   show($('raceCalibApply'), false);
   toast(state.device && (state.info?.proto || 1) >= 3 ? 'Montaż zapisany i wysłany do Xiao' : 'Montaż zapisany – trafi do Xiao po połączeniu');
   if (state.currentRace) openRace(state.currentRace.id);
@@ -1175,14 +1195,17 @@ async function saveSettings() {
   s.drift.cs_required = $('setCsReq').checked ? 1 : 0;
   s.drift.full_bonus = $('setFullBonus').checked ? 1 : 0;
   const old = state.settings;
-  // osie / kąt ustawione ręcznie – od teraz profil jest źródłem montażu (zmiana samego skrętu się nie liczy)
-  if (JSON.stringify(old.imu_axes) !== JSON.stringify(s.imu_axes) || old.estimator.yaw_offset_deg !== s.estimator.yaw_offset_deg) s.axes_set = true;
+  // osie / kąt / skręt / pełny gaz zmienione ręcznie → wysłać do Xiao (mount_dirty)
+  const axesChanged = JSON.stringify(old.imu_axes) !== JSON.stringify(s.imu_axes) || old.estimator.yaw_offset_deg !== s.estimator.yaw_offset_deg;
+  if (axesChanged) s.axes_set = true;
+  const mountChanged = axesChanged || old.drift.steer_sign !== s.drift.steer_sign || old.drift.full_bonus !== s.drift.full_bonus ||
+    old.drift.full_thr_pct !== s.drift.full_thr_pct || old.drift.full_thr_s !== s.drift.full_thr_s;
   if (DRIFT_FIELDS.some(([k]) => !(s.drift[k] >= 0))) { $('setMsg').textContent = 'Niepoprawne wartości punktów za drift.'; return; }
   const axesUsed = new Set(Object.values(s.imu_axes).map((a) => a[1]));
   if (axesUsed.size !== 3) { $('setMsg').textContent = 'Każda oś auta musi mieć inną oś płytki.'; return; }
   if (!(s.final_drive_ratio > 0 && s.front_tire_diameter_mm > 0 && s.lowpass_hz > 0 && s.race_lowpass_hz > 0)) { $('setMsg').textContent = 'Niepoprawne wartości.'; return; }
   await persistSettings(s);
-  await sendMount();
+  if (mountChanged) await markMountDirty();
   $('setMsg').textContent = 'Zapisano – wszystkie starty zostaną przeliczone.';
   toast('Zapisano ustawienia');
 }
@@ -1240,7 +1263,7 @@ async function selectProfile(id) {
   state.settings = activeProfile().settings;
   state.analysisCache.clear();
   await db.kvSet('settings', state.settings);
-  await sendMount();
+  await markMountDirty();   // wybór profilu = świadoma zmiana auta → Xiao dostaje ten profil
   renderSettings();
 }
 
@@ -1273,7 +1296,7 @@ async function profileRename() {
   if (!name) { toast('Wpisz nową nazwę w polu obok'); return; }
   activeProfile().name = name;
   await db.kvSet('profiles', state.profiles);
-  await sendMount();
+  await markMountDirty();
   renderProfiles();
   toast('Zmieniono nazwę profilu');
 }

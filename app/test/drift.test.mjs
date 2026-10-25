@@ -92,3 +92,15 @@ test('bonus za pełny gaz: więcej punktów, te same łańcuchy', () => {
   assert.equal(on.transitions, off.transitions);
   assert.ok(off.full_drift_s > 1.9 && off.full_drift_s < 2.7);
 });
+
+test('auto-korekta odchyłki montażu: 12° → trim ≈ 12°', () => {
+  const p = driftParams(DEFAULT_SETTINGS);
+  const s = driftInit();
+  const d = 12 * Math.PI / 180;
+  for (let i = 0; i < 60; i++) driftStep(s, p, 0.05, 0, 0, 0, true, 0, 0);
+  for (let k = 0; k < 400; k++) {
+    const a = Math.floor(k / 20) % 2 === 0 ? 0.2 : -0.25;
+    driftStep(s, p, 0.05, a * Math.cos(d), a * Math.sin(d), 0, false, 0, 50);
+  }
+  assert.ok(Math.abs(s.trim - 12) < 1, String(s.trim));
+});

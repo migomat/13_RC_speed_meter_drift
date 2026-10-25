@@ -97,6 +97,7 @@ static void on_race_sample(const RaceSample& r) {
   drift_step(&s_ds, &s_dp, (float)r.n_ticks / SAMPLE_RATE_HZ, car_axis(a, 0), car_axis(a, 1),
              car_axis(g, 2), rest, sv, sp, pct);
   g_live.d_full = s_ds.full_on;
+  g_live.d_trim = s_ds.trim;
   g_live.steer_pct = sv ? sp * (s_ds.steer_ok ? (float)drift_steer_sign(&s_ds, &s_dp) : 1.0f) : 0.0f;
   g_live.steer_valid = sv;
   g_live.d_cs = s_ds.cs;
@@ -274,6 +275,19 @@ void loop() {
   if (logger_state() != LS_SAVING) flash_poll();
   if (vmax_reset_requested()) s_es.v_max = 0.0f;
   if (drift_reset_requested()) drift_reset_score(&s_ds);
+  // Auto-korekta odchyłki montażu → dopisana do zapisanego montażu, gdy nic się nie nagrywa
+  static uint32_t s_fold_ms;
+  if (!race_recording() && !logger_busy() && fabsf(s_ds.trim) >= DRIFT_AY_FOLD_DEG &&
+      s_ds.trim_t >= DRIFT_AY_FOLD_MIN_S && millis() - s_fold_ms > 10000) {
+    float y = g_mount.yaw_deg + s_ds.trim;
+    while (y > 180.0f) y -= 360.0f;
+    while (y < -180.0f) y += 360.0f;
+    g_mount.yaw_deg = roundf(y * 10.0f) / 10.0f;   // obrót ten sam – estymator i drift bez resetu
+    s_ds.trim = 0.0f;
+    s_ds.trim_t = 0.0f;
+    s_fold_ms = millis();
+    mount_store_request_save();
+  }
   mount_store_poll(logger_busy() || race_recording());
   if (mount_changed()) {
     // bias i odniesienia liczone w starych osiach – od nowa

@@ -43,7 +43,7 @@ class EngineProcessor extends AudioWorkletProcessor {
     const rpm = params.rpm[0], load = params.load[0], limit = params.limit[0] >= 0.5, crackle = params.crackle[0];
     const fire = rpm / 60 * 2;                       // zapłony na sekundę
     const kHi = Math.exp(-dt / 0.0005), kLo = Math.exp(-dt / (0.004 + 0.35 / fire));
-    const kPop = Math.exp(-dt / 0.004);
+    const kPop = Math.exp(-dt / 0.009);   // dłuższy, niższy „bang” (krótki brzmiał jak zgniatana puszka)
     const strength = 0.25 + 0.75 * load;             // bez gazu cichy, „pusty” dźwięk
     // druga warstwa: tonalne „wycie” dolotu (zapłony + 2. i 3. harmoniczna) – od ~2500 rpm, z gazem;
     // trzecia: pomruk wału (pół-rząd, częstotliwość obrotu) – cały zakres
@@ -65,7 +65,8 @@ class EngineProcessor extends AudioWorkletProcessor {
         } else if (this.rand() < 0.03) {
           this.pop += 0.8 + 0.8 * this.rand();       // niespalone paliwo na odcięciu – sporadyczny strzał
         }
-        if (crackle > 0 && !cut && this.rand() < 0.22 * crackle) this.pop += 0.7 + 1.3 * this.rand();
+        // strzały przy hamowaniu silnikiem: pojedyncze, z przerwami (seria krótkich trzasków = „puszka”)
+        if (crackle > 0 && !cut && this.pop < 0.05 && this.rand() < 0.06 * crackle) this.pop += 0.9 + 1.1 * this.rand();
       }
       const n = this.rand() * 2 - 1;
       this.ph += fire * dt;

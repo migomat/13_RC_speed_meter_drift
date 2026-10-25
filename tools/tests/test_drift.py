@@ -209,3 +209,20 @@ def test_c_full_bonus_matches_python(drift_bin):
                                   text=True)
     rows = np.array([[float(x) for x in ln.split()] for ln in out.splitlines()])
     assert math.isclose(rows[-1, 4], py["total"][-1], rel_tol=0.01)
+
+
+def test_auto_yaw_trim_converges():
+    """Płytka obrócona o 12° względem ustawionego montażu: przyspieszanie / hamowanie na wprost → trim ≈ 12°."""
+    from rc_launch.drift import drift_init, drift_params, drift_step
+    p = drift_params(DEFAULT_CONFIG)
+    s = drift_init()
+    d = math.radians(12.0)
+    for _ in range(60):                                   # postój – bias
+        drift_step(s, p, 0.05, 0.0, 0.0, 0.0, True, 0.0, 0.0)
+    for k in range(400):                                  # 20 s: 1 s gazu, 1 s hamowania
+        a = 0.2 if (k // 20) % 2 == 0 else -0.25
+        drift_step(s, p, 0.05, a * math.cos(d), a * math.sin(d), 0.0, False, 0.0, 50.0)
+    assert abs(s["trim"] - 12.0) < 1.0, s["trim"]
+    for k in range(200):                                  # kręcenie w kółko nie rusza korekty
+        drift_step(s, p, 0.05, 0.1, 0.4, 120.0, False, -20.0, 50.0)
+    assert abs(s["trim"] - 12.0) < 1.0

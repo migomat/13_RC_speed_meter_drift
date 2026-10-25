@@ -12,7 +12,7 @@ export const GET_BLOCK_MAX = 4096;
 // Punkty driftu w LIVE (protokół 3): "d":[pts, mult, total, last, best, ang, on, chain, banks, lost, trans]
 // protokół 4: + [cs (kontra), steer_sign (znak skrętu w użyciu, 0 = nieznany)]; 6: + [full (pełny gaz ≥ 1 s)]
 export const LIVE_DRIFT_KEYS = ['d_pts', 'd_mult', 'd_total', 'd_last', 'd_best', 'd_ang', 'd_on', 'd_chain', 'd_banks',
-  'd_lost', 'd_trans', 'd_cs', 'd_steer_sign', 'd_full'];
+  'd_lost', 'd_trans', 'd_cs', 'd_steer_sign', 'd_full', 'd_trim'];   // 8: + trim (auto-korekta montażu [°])
 export function expandLive(m) {
   if (Array.isArray(m.d)) LIVE_DRIFT_KEYS.forEach((k, i) => { m[k] = m.d[i]; });
   return m;

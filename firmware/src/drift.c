@@ -44,6 +44,14 @@ void drift_default_params(DriftParams* p) {
   p->cs_min_pct = DRIFT_CS_MIN_PCT;
   p->cs_required = DRIFT_CS_REQUIRED;
   p->angle_no_cs_deg = DRIFT_ANGLE_NO_CS_DEG;
+  p->auto_yaw = DRIFT_AUTO_YAW;
+  p->ay_min_g = DRIFT_AY_MIN_G;
+  p->ay_max_dps = DRIFT_AY_MAX_DPS;
+  p->ay_steer_pct = DRIFT_AY_STEER_PCT;
+  p->ay_hold_s = DRIFT_AY_HOLD_S;
+  p->ay_tau_s = DRIFT_AY_TAU_S;
+  p->ay_max_err_deg = DRIFT_AY_MAX_ERR_DEG;
+  p->ay_max_trim_deg = DRIFT_AY_MAX_TRIM_DEG;
   p->full_bonus = DRIFT_FULL_BONUS;
   p->full_thr_pct = DRIFT_FULL_THR_PCT;
   p->full_thr_s = DRIFT_FULL_THR_S;
@@ -90,7 +98,7 @@ void drift_step(DriftState* s, const DriftParams* p, float dt, float a_fwd, floa
                 float r_dps, int rest_hint, int steer_valid, float steer_raw, float thr_pct) {
   if (dt <= 0.0f) return;
   if (dt > p->max_dt_s) dt = p->max_dt_s;
-  float yaw = p->yaw_offset_deg * DEG2RAD;
+  float yaw = (p->yaw_offset_deg + s->trim) * DEG2RAD;
   float c = cosf(yaw), sn = sinf(yaw);
   float af = a_fwd * c + a_left * sn;
   float al = -a_fwd * sn + a_left * c;
@@ -125,6 +133,25 @@ void drift_step(DriftState* s, const DriftParams* p, float dt, float a_fwd, floa
     s->f_r += k * (r - s->f_r);
   }
   float fa = s->f_af, fl = s->f_al, fr = s->f_r;
+
+  float amag0 = sqrtf(fa * fa + fl * fl);
+  if (p->auto_yaw && fabsf(fr) < p->ay_max_dps && amag0 >= p->ay_min_g &&
+      (!steer_valid || fabsf(steer_raw) < p->ay_steer_pct)) {
+    s->straight_t += dt;
+    if (s->straight_t >= p->ay_hold_s - T_EPS) {
+      float sg = fa >= 0.0f ? 1.0f : -1.0f;
+      float err = atan2f(fl * sg, fa * sg) * RAD2DEG;
+      if (fabsf(err) < p->ay_max_err_deg) {
+        float t = s->trim + err * dt / p->ay_tau_s;
+        if (t > p->ay_max_trim_deg) t = p->ay_max_trim_deg;
+        if (t < -p->ay_max_trim_deg) t = -p->ay_max_trim_deg;
+        s->trim = t;
+        s->trim_t += dt;
+      }
+    }
+  } else {
+    s->straight_t = 0.0f;
+  }
 
   int sgn = drift_steer_sign(s, p);
   int steer_ok = sgn != 0 && steer_valid;
