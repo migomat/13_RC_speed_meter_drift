@@ -37,6 +37,8 @@ typedef struct {
   float steer_learn_s, learn_drift_deg, cs_min_pct;
   int   cs_required;
   float angle_no_cs_deg;
+  int   full_bonus;         /* 1 = bonus za pełny gaz w drifcie */
+  float full_thr_pct, full_thr_s, full_bonus_mult;
 } DriftParams;
 
 typedef struct {
@@ -53,6 +55,9 @@ typedef struct {
   int   steer_ok;         /* steer ważny (znany znak i sygnał) */
   float steer;            /* skręt [%], + = w lewo */
   int   cs;               /* kontra */
+  float full_t;           /* czas nieprzerwanego pełnego gazu */
+  int   full_on;          /* pełny gaz ≥ full_thr_s (bonus / dźwięk odcięcia) */
+  float full_drift_t;
   int   in_drift;
   float seg_t;
   int   seg_dir, seg_ok;
@@ -72,9 +77,9 @@ void drift_reset_score(DriftState* s);
 /* Znak skrętu w użyciu: ustawiony albo nauczony (0 = nieznany) */
 int  drift_steer_sign(const DriftState* s, const DriftParams* p);
 /* dt [s], a_fwd / a_left [g] i r_up [dps] w osiach auta, rest_hint = brak zboczy i gaz
- * w neutrum, steer_valid / steer_raw = skręt [% od neutrum, znak surowy] */
+ * w neutrum, steer_valid / steer_raw = skręt [% od neutrum, znak surowy], thr_pct = gaz [%] */
 void drift_step(DriftState* s, const DriftParams* p, float dt, float a_fwd, float a_left,
-                float r_up, int rest_hint, int steer_valid, float steer_raw);
+                float r_up, int rest_hint, int steer_valid, float steer_raw, float thr_pct);
 
 #ifdef __cplusplus
 }

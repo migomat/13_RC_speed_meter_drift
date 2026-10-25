@@ -4,7 +4,7 @@
  * Format 1 (próbka 20 B) i 2 (22 B, skręt) – krok próbki z nagłówka.
  * Używane przez tools/tests/test_drift.py.
  *   gcc -O2 -I../../firmware/src drift_host.c ../../firmware/src/drift.c -lm
- *   drift_host plik.bin [forward left up yaw_deg [steer_sign]]   np. +x +y +z 0 0 */
+ *   drift_host plik.bin [forward left up yaw_deg [steer_sign [full_bonus]]]   np. +x +y +z 0 0 1 */
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -58,10 +58,12 @@ int main(int argc, char** argv) {
     yaw = (float)atof(argv[5]);
   }
   int steer_sign = argc >= 7 ? atoi(argv[6]) : 0;
+  int full_bonus = argc >= 8 ? atoi(argv[7]) : 0;
   DriftParams p;
   drift_default_params(&p);
   p.yaw_offset_deg = yaw;
   p.steer_sign = steer_sign;
+  p.full_bonus = full_bonus;
   DriftState s;
   drift_init(&s);
   for (uint32_t i = 0; i < ns; i++) {
@@ -80,7 +82,7 @@ int main(int argc, char** argv) {
     int sv = steer_neutral && x->steer_us;
     float sp = sv ? ((int)x->steer_us - (int)steer_neutral) * 100.0f / (steer_full ? steer_full : 500) : 0.0f;
     float dt = (float)x->n_ticks / (float)tick;
-    drift_step(&s, &p, dt, a[ai[0]] * as[0], a[ai[1]] * as[1], g[ai[2]] * as[2], rest, sv, sp);
+    drift_step(&s, &p, dt, a[ai[0]] * as[0], a[ai[1]] * as[1], g[ai[2]] * as[2], rest, sv, sp, pct);
     printf("%.4f %.4f %.3f %d %.3f %d %d\n", s.angle, s.corner ? s.v : 0.0f, s.pts, s.mult, s.total,
            s.in_drift, s.cs);
   }

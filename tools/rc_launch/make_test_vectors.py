@@ -373,7 +373,8 @@ _EIGHTS = [
 ]
 DRIFT_SCENARIOS = {
     "drift_eights": dict(seq=31, segments=_EIGHTS, steer_polarity=1,
-                         truth=dict(transitions=2, chains=1, spins=1, steer_sign=1)),
+                         full_throttle=[(14.9, 17.2), (23.4, 25.4)],   # pełny gaz: prawy drift, drugi łańcuch
+                         truth=dict(transitions=2, chains=1, spins=1, steer_sign=1, full_drift_s=2.3)),
     "drift_eights_rev": dict(seq=32, segments=_EIGHTS, steer_polarity=-1,
                              truth=dict(transitions=2, chains=1, spins=1, steer_sign=-1)),
 }
@@ -425,7 +426,9 @@ def make_drift_vector(scn: dict, seed: int):
         vw = float(np.mean(V[sl]))
         rpm = vw * 1.3 / m_per_rev * 60.0
         period = int(round(60e6 / rpm / 4)) if rpm > 400 else 0
-        thr = 1352 if vw < 0.05 else 1352 + 220
+        tj = (j + 1) / fs
+        full = any(a <= tj < b for a, b in scn.get("full_throttle", []))
+        thr = 1352 if vw < 0.05 else (1352 + 500 if full else 1352 + 220)
         steer = STEER_NEUTRAL_US + int(round(scn["steer_polarity"] * float(np.mean(S[sl])) * 5.0
                                              + rng.normal(0, 1.0)))
         nz = rng.normal(0, 0.008, 3)
@@ -457,7 +460,7 @@ def drift_expected_for(data: bytes, cfg: dict) -> dict:
     sr = res["series"]
     return dict(config=cfg, summary={k: float(v) for k, v in res["summary"].items()},
                 series={k: [None if math.isnan(x) else float(x) for x in sr[k]]
-                        for k in ("angle", "v", "pts", "mult", "total", "drift", "steer", "cs")})
+                        for k in ("angle", "v", "pts", "mult", "total", "drift", "steer", "cs", "full")})
 
 
 def race_expected_for(data: bytes, cfg: dict) -> dict:

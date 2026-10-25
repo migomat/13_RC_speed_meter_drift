@@ -39,6 +39,10 @@ export const DEFAULT_DRIFT = {
   cs_min_pct: 8.0,        // [%] skręt od neutrum uznany za kontrę
   cs_required: 1,         // 1 = przy znanym skręcie drift wymaga kontry (albo dużego kąta)
   angle_no_cs_deg: 35.0,  // [deg] od tego kąta drift także bez kontry
+  full_bonus: 0,          // 1 = bonus za pełny gaz w drifcie (przełącznik w profilu)
+  full_thr_pct: 95.0,     // [%] gaz uznany za pełny
+  full_thr_s: 1.0,        // [s] tak długo nieprzerwanie = pełny gaz
+  full_bonus_mult: 1.5,   // mnożnik punktów w drifcie przy pełnym gazie
 };
 
 export function driftParams(settings) {
@@ -53,7 +57,7 @@ export function driftInit() {
     have_bias: false, b_af: 0, b_al: 0, b_r: 0,
     first: true, f_af: 0, f_al: 0, f_r: 0,
     corner: false, corner_t: 0, r_prev: 0, v: 0, vdot: 0, angle: 0, spin_t: 0,
-    steer_ev: 0, steer_learned: 0, steer: NaN, cs: false,
+    steer_ev: 0, steer_learned: 0, steer: NaN, cs: false, full_t: 0, full_on: false, full_drift_t: 0,
     in_drift: false, seg_t: 0, seg_dir: 0, seg_ok: false,
     chain: false, chain_ok: false, prev_dir: 0, grace_t: 0,
     pts: 0, mult: 1, total: 0, best: 0, last: 0,
@@ -80,13 +84,13 @@ function bank(s) {
 export function driftResetScore(s) {
   Object.assign(s, { in_drift: false, seg_t: 0, seg_dir: 0, seg_ok: false, chain: false, chain_ok: false,
     prev_dir: 0, grace_t: 0, pts: 0, mult: 1, total: 0, best: 0, last: 0, n_banks: 0, n_lost: 0,
-    n_trans: 0, drift_t: 0, angle_max: 0 });
+    n_trans: 0, drift_t: 0, angle_max: 0, full_drift_t: 0 });
 }
 
 /** Znak skrętu w użyciu: ustawiony albo nauczony (0 = nieznany). */
 export function steerSignOf(s, p) { return p.steer_sign ? Math.trunc(p.steer_sign) : s.steer_learned; }
 
-export function driftStep(s, p, dt, aFwd, aLeft, rDps, restHint, steerRaw = NaN) {
+export function driftStep(s, p, dt, aFwd, aLeft, rDps, restHint, steerRaw = NaN, thrPct = 0) {
   if (dt <= 0) return;
   dt = Math.min(dt, p.max_dt_s);
   const yaw = p.yaw_offset_deg * D2R;
@@ -175,6 +179,8 @@ export function driftStep(s, p, dt, aFwd, aLeft, rDps, restHint, steerRaw = NaN)
   const drifting = corner && s.v >= p.min_v_mps && angle >= p.min_angle_deg && angle <= p.spin_angle_deg &&
     (!gate || s.cs || angle >= p.angle_no_cs_deg);
   s.spin_t = (corner && Math.abs(angle) > p.spin_angle_deg) ? s.spin_t + dt : 0;
+  s.full_t = thrPct >= p.full_thr_pct ? s.full_t + dt : 0;
+  s.full_on = s.full_t >= p.full_thr_s - T_EPS;
 
   if (s.chain && s.spin_t >= p.spin_s - T_EPS) {
     if (p.spin_loses_chain) {
@@ -208,8 +214,10 @@ export function driftStep(s, p, dt, aFwd, aLeft, rDps, restHint, steerRaw = NaN)
       }
       s.prev_dir = s.seg_dir;
     }
-    s.pts += s.v * dt * (p.pts_per_m + p.pts_per_m_deg * angle);
+    const bonus = (p.full_bonus && s.full_on) ? p.full_bonus_mult : 1;
+    s.pts += s.v * dt * (p.pts_per_m + p.pts_per_m_deg * angle) * bonus;
     s.drift_t += dt;
+    if (s.full_on) s.full_drift_t += dt;
     s.angle_max = Math.max(s.angle_max, angle);
   } else {
     s.in_drift = false;
@@ -243,7 +251,20 @@ export function raceInputs(race, settings) {
   const [, , gu] = mapAxes(sc(race.gx, kg), sc(race.gy, kg), sc(race.gz, kg), axes);
   const dt = new Float64Array(race.n);
   for (let i = 0; i < race.n; i++) dt[i] = race.n_ticks[i] / h.tick_rate_hz;
-  return { dt, af, al, gu, rest: restMask(race), steer: steerPct(race) };
+  return { dt, af, al, gu, rest: restMask(race), steer: steerPct(race), thr: thrPct(race) };
+}
+
+/** Gaz [% do przodu] jak w firmware; brak sygnału / nienauczone neutrum → 0. */
+export function thrPct(race) {
+  const h = race.header;
+  const neutral = h.throttle_neutral_us, full = h.throttle_full_us || 500;
+  const sign = h.throttle_fwd_higher ? 1 : -1;
+  const out = new Float64Array(race.n);
+  for (let i = 0; i < race.n; i++) {
+    const w = race.throttle_us[i];
+    out[i] = (w && neutral) ? (w - neutral) * 100 / full * sign : 0;
+  }
+  return out;
 }
 
 /** Skręt [% od neutrum, znak surowy]; NaN = brak sygnału, nienauczone neutrum albo format 1. */
@@ -262,13 +283,13 @@ export function steerPct(race) {
 /** Przebiegi i podsumowanie punktów za drift dla nagrania wyścigu – jak drift_score(). */
 export function driftScore(race, settings) {
   const p = driftParams(settings);
-  const { dt, af, al, gu, rest, steer } = raceInputs(race, settings);
+  const { dt, af, al, gu, rest, steer, thr } = raceInputs(race, settings);
   const n = dt.length;
   const s = driftInit();
   const out = {};
-  for (const k of ['angle', 'v', 'pts', 'mult', 'total', 'drift', 'steer', 'cs']) out[k] = new Float64Array(n);
+  for (const k of ['angle', 'v', 'pts', 'mult', 'total', 'drift', 'steer', 'cs', 'full']) out[k] = new Float64Array(n);
   for (let i = 0; i < n; i++) {
-    driftStep(s, p, dt[i], af[i], al[i], gu[i], rest[i], steer[i]);
+    driftStep(s, p, dt[i], af[i], al[i], gu[i], rest[i], steer[i], thr[i]);
     out.angle[i] = s.angle;
     out.v[i] = s.corner ? s.v : 0;
     out.pts[i] = s.pts;
@@ -277,11 +298,13 @@ export function driftScore(race, settings) {
     out.drift[i] = s.in_drift ? 1 : 0;
     out.steer[i] = s.steer;
     out.cs[i] = s.cs ? 1 : 0;
+    out.full[i] = s.full_on ? 1 : 0;
   }
   const end = { ...s };
   bank(end);
   const summary = { total: end.total, best_chain: end.best, chains: end.n_banks, transitions: s.n_trans,
-    spins: s.n_lost, drift_time_s: s.drift_t, angle_max_deg: s.angle_max, steer_sign: steerSignOf(s, p) };
+    spins: s.n_lost, drift_time_s: s.drift_t, angle_max_deg: s.angle_max, steer_sign: steerSignOf(s, p),
+    full_drift_s: s.full_drift_t };
   out.t = race.t_s;
   return { series: out, summary };
 }
@@ -294,6 +317,7 @@ export const DRIFT_SUMMARY_LABELS = {
   spins: ['Obroty (stracone)', ''],
   drift_time_s: ['Czas w drifcie', 's'],
   angle_max_deg: ['Maks. kąt', '°'],
+  full_drift_s: ['Drift na pełnym gazie', 's'],
 };
 
 // ------------------------------------------------------------------ kalibracja montażu

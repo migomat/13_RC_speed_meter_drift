@@ -6,9 +6,9 @@
 #include <stdint.h>
 
 #define FW_VERSION_MAJOR    1
-#define FW_VERSION_MINOR    4
-#define FW_VERSION_PATCH    1
-#define FW_VERSION_STR      "1.4.1"
+#define FW_VERSION_MINOR    5
+#define FW_VERSION_PATCH    0
+#define FW_VERSION_STR      "1.5.0"
 
 // ---------------------------------------------------------------- hall
 // Tryb czujnika halla: 1 (tylko linia A) albo 3 (A/B/C).
@@ -183,6 +183,10 @@
 #define DRIFT_CS_MIN_PCT            8.0f    // [%] skręt od neutrum uznany za kontrę
 #define DRIFT_CS_REQUIRED           1       // 1 = przy znanym skręcie drift wymaga kontry
 #define DRIFT_ANGLE_NO_CS_DEG       35.0f   // [deg] od tego kąta drift także bez kontry
+#define DRIFT_FULL_BONUS            0       // bonus za pełny gaz – domyślnie wył. (profil: DRIFT BONUS 1)
+#define DRIFT_FULL_THR_PCT          95.0f   // [%] gaz uznany za pełny
+#define DRIFT_FULL_THR_S            1.0f    // [s] tak długo nieprzerwanie = pełny gaz
+#define DRIFT_FULL_BONUS_MULT       1.5f    // mnożnik punktów w drifcie przy pełnym gazie
 
 // ---------------------------------------------------------------- BLE
 #define BLE_NAME            "X4F-LOG"
@@ -195,10 +199,11 @@
 // ---------------------------------------------------------------- format
 #define RUN_FORMAT_VERSION  1
 #define RACE_FORMAT_VERSION 2       // 2: skręt w próbce (22 B) i neutrum skrętu w nagłówku
-#define PROTOCOL_VERSION    5       // 2: komendy wyścigów RLIST/RGET/RDEL/RERASE/RSTOP
+#define PROTOCOL_VERSION    6       // 2: komendy wyścigów RLIST/RGET/RDEL/RERASE/RSTOP
                                     // 3: punkty driftu w LIVE, DRIFT RESET, MOUNT
                                     // 4: skręt (LIVE "st", kontra i znak skrętu w "d", MOUNT … <znak>)
                                     // 5: profil auta – MOUNT … <nazwa>, zapis na stałe (mount_saved)
+                                    // 6: bonus za pełny gaz – DRIFT BONUS 0|1, flaga full w "d"
 
 // ---------------------------------------------------------------- debug
 // Komendy SIM_* (syntetyczne zbocza/gaz) dostępne tylko przez USB.

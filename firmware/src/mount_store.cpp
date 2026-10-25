@@ -21,7 +21,8 @@ struct __attribute__((packed)) MountRec {
   float    yaw_deg;
   int8_t   steer_sign;
   char     name[MOUNT_NAME_LEN];
-  uint8_t  reserved[REC_SIZE - 4 - 2 - 6 - 4 - 1 - MOUNT_NAME_LEN - 4];
+  uint8_t  flags;     // bit 0: bonus za pełny gaz (stare rekordy: 0)
+  uint8_t  reserved[REC_SIZE - 4 - 2 - 6 - 4 - 1 - MOUNT_NAME_LEN - 1 - 4];
   uint32_t crc32;   // CRC bajtów przed tym polem
 };
 static_assert(sizeof(MountRec) == REC_SIZE, "MountRec = 64 B");
@@ -70,6 +71,7 @@ bool mount_store_load(void) {
   }
   g_mount.yaw_deg = last.yaw_deg;
   g_mount.steer_sign = last.steer_sign;
+  g_mount.full_bonus = last.flags & 1;
   memcpy(g_mount_name, last.name, MOUNT_NAME_LEN);
   g_mount_name[MOUNT_NAME_LEN - 1] = 0;
   s_saved = true;
@@ -101,6 +103,7 @@ void mount_store_poll(bool busy) {
   }
   m.yaw_deg = g_mount.yaw_deg;
   m.steer_sign = (int8_t)g_mount.steer_sign;
+  m.flags = g_mount.full_bonus ? 1 : 0;
   memcpy(m.name, g_mount_name, MOUNT_NAME_LEN);
   m.crc32 = crc32(&m, REC_SIZE - 4);
   uint32_t t0 = micros();

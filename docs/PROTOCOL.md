@@ -1,10 +1,11 @@
-# Protokół X4F-LOG (wersja 5)
+# Protokół X4F-LOG (wersja 6)
 
 Wersja 2 (fw 1.1.0) dodaje komendy wyścigów `RLIST`/`RGET`/`RDEL`/`RERASE`/`RSTOP` i pola
 `race_*`. Wersja 3 (fw 1.2.0, drift) dodaje punkty za drift w `LIVE` (`d`), `DRIFT RESET`
 i `MOUNT`. Wersja 4 (fw 1.3.0) dodaje skręt: `st` w `LIVE`, kontrę i znak skrętu w `d`,
 znak skrętu w `MOUNT`, pola `steer_*` w `STATUS`; `LIVE` bez pola `zupt`. Wersja 5 (fw 1.4.0):
-profil auta – nazwa w `MOUNT`, zapis na stałe w QSPI (`mount_saved`), po resecie ostatni profil. Klient sprawdza `proto` z `INFO` – starszy firmware nie zna nowych komend.
+profil auta – nazwa w `MOUNT`, zapis na stałe w QSPI (`mount_saved`), po resecie ostatni profil.
+Wersja 6 (fw 1.5.0): bonus za pełny gaz – `DRIFT BONUS 0|1` (część profilu), flaga `full` w `d`. Klient sprawdza `proto` z `INFO` – starszy firmware nie zna nowych komend.
 
 Transport BLE: Nordic UART Service (`6e400001-…`), RX `6e400002` (zapis, telefon → Xiao),
 TX `6e400003` (notyfikacje). Nazwa rozgłoszeniowa `X4F-LOG`. MTU do 247 (payload 244).
@@ -35,9 +36,10 @@ u32 magic 0x42463458 ("X4FB") | u32 seq | u32 offset | u32 len | u32 crc32(dane)
 | `GET <seq> <offset> <len>` | ramka binarna; `len ≤ 4096`; przez BLE przełącza na PHY 2M (szybsze pobieranie) |
 | `DEL <seq>` | `OK DEL <seq>` albo `{"err":"NOT_FOUND","seq":…}` |
 | `ARM` | `OK` – powrót z ERROR do IDLE |
-| `LIVE 1` / `LIVE 0` | `OK`; potem 20 Hz: `{"live":1,"v","v_max","v_front","slip","rpm","thr","thr_pct","ax","state","race","race_s","st","d":[…]}` – `race`: stan zapisu wyścigu, `race_s`: długość bieżącego wyścigu [s]; `st`: skręt [%] (+ = w lewo, gdy znak znany; inaczej znak surowy; 0 = brak sygnału); drift w tablicy `d`: `[pts, mult, total, last, best, ang, on, chain, banks, lost, trans, cs, steer_sign]` = punkty bieżącego łańcucha (przed mnożnikiem), mnożnik, suma, ostatni zaliczony łańcuch (×mnożnik), najlepszy, kąt driftu [°] (0 poza łukiem), drift teraz (0/1), łańcuch trwa (0/1), zaliczone łańcuchy, obroty, przekładki, kontra (0/1), znak skrętu w użyciu (1/−1, 0 = nieznany). Cała linia mieści się w jednej notyfikacji BLE (najgorszy przypadek ok. 234 B). Wynik liczy Xiao – zgubione linie LIVE nic nie zmieniają. `LIVE 1` przez BLE przełącza na PHY 1M (zasięg) |
+| `LIVE 1` / `LIVE 0` | `OK`; potem 20 Hz: `{"live":1,"v","v_max","v_front","slip","rpm","thr","thr_pct","ax","state","race","race_s","st","d":[…]}` – `race`: stan zapisu wyścigu, `race_s`: długość bieżącego wyścigu [s]; `st`: skręt [%] (+ = w lewo, gdy znak znany; inaczej znak surowy; 0 = brak sygnału); drift w tablicy `d`: `[pts, mult, total, last, best, ang, on, chain, banks, lost, trans, cs, steer_sign, full]` = punkty bieżącego łańcucha (przed mnożnikiem), mnożnik, suma, ostatni zaliczony łańcuch (×mnożnik), najlepszy, kąt driftu [°] (0 poza łukiem), drift teraz (0/1), łańcuch trwa (0/1), zaliczone łańcuchy, obroty, przekładki, kontra (0/1), znak skrętu w użyciu (1/−1, 0 = nieznany), pełny gaz ≥ 1 s (0/1, v6 – bonus i dźwięk odcięcia w aplikacji). Cała linia mieści się w jednej notyfikacji BLE (najgorszy przypadek ok. 234 B). Wynik liczy Xiao – zgubione linie LIVE nic nie zmieniają. `LIVE 1` przez BLE przełącza na PHY 1M (zasięg) |
 | `VMAX RESET` | `OK` |
 | `DRIFT RESET` | `OK` – zerowanie punktów za drift (v3) |
+| `DRIFT BONUS 0\|1` | `{"mount":…,"drift_bonus":…}` (v6) – bonus za pełny gaz: gaz ≥ 95 % nieprzerwanie ≥ 1 s → punkty w drifcie ×1,5; zapisywany z profilem (zostaje po resecie) |
 | `MOUNT [<forward> <left> <up> <yaw_deg> [<znak skrętu> [<nazwa>]]]` | `{"mount":[f, l, u, yaw, znak, "nazwa"],"mount_saved":…,"mount_save_us":…}` – bez argumentów odczyt; np. `MOUNT +y -x +z -18.5 -1 driftowóz` ustawia montaż płytki dla prędkościomierza i driftu (układ prawoskrętny, \|yaw\| ≤ 180), znak skrętu (v4: 1 normalny, −1 odwrócony, 0 = nauka w jeździe) i nazwę profilu auta (v5: bez spacji, bez `"` i `\`, < 24 B UTF-8; aplikacja zamienia spacje na `_`). Od v5 Xiao zapisuje profil na stałe (QSPI, rekord ~2 ms, tylko gdy nic się nie nagrywa) i po resecie wczytuje ostatni; ten sam profil wysłany ponownie niczego nie zapisuje. Zmiana montażu lub znaku skrętu zeruje estymator, filtry, punkty driftu i nauczony znak skrętu. Zła wartość: `{"err":"BAD_MOUNT"}` |
 | `RLIST` | `{"races":[{"seq","len","crc","unix","boot","uptime_ms","n","end","read"}…],"state","used","size"}` – od najstarszego; `read`: oznaczony jako pobrany; `state`: IDLE / RECORDING / FINISHING / FULL / ERASING / DIRTY / ERROR |
 | `RGET <seq> <offset> <len>` | ramka binarna jak `GET`; dane = plik wyścigu (`docs/FORMAT.md`) |

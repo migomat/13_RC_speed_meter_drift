@@ -22,6 +22,7 @@ struct LiveData {
   int      d_steer_sign;        // znak skrętu w użyciu (0 = nieznany)
   float    steer_pct;           // skręt [%] (+ = w lewo, gdy znak znany)
   bool     steer_valid;
+  bool     d_full;              // pełny gaz ≥ DRIFT_FULL_THR_S (bonus, dźwięk odcięcia)
 };
 // Montaż płytki (main.cpp): osie auta forward/left/up = oś płytki idx (0=x,1=y,2=z) · znak
 struct Mount {
@@ -29,6 +30,7 @@ struct Mount {
   int   sign[3];
   float yaw_deg;
   int   steer_sign;   // skręt: 1 normalny, -1 odwrócony, 0 = nauka (drift.c)
+  int   full_bonus;   // 1 = bonus za pełny gaz w drifcie (DRIFT BONUS)
 };
 extern Mount g_mount;
 extern LiveData g_live;

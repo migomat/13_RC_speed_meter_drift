@@ -81,3 +81,14 @@ test('kalibracja: znak skrętu z jazdy z przyczepnością (normalny i odwrócony
     assert.equal(cal.steer_sign, sign, name);
   }
 });
+
+test('bonus za pełny gaz: więcej punktów, te same łańcuchy', () => {
+  const r = load('drift_eights');
+  const off = driftScore(r, DEFAULT_SETTINGS).summary;
+  const cfg = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+  cfg.drift.full_bonus = 1;
+  const on = driftScore(r, cfg).summary;
+  assert.ok(on.total > 1.05 * off.total);
+  assert.equal(on.transitions, off.transitions);
+  assert.ok(off.full_drift_s > 1.9 && off.full_drift_s < 2.7);
+});

@@ -98,10 +98,10 @@
       <div class="dr-mult" id="drMult">×1</div>
       <div class="dr-event" id="drEvent"></div>
       <div class="dr-angle"><div class="dr-bar"><span id="drAngleBar"></span></div><b id="drAngle">0°</b></div>
-      <div class="dr-steer"><span id="drCs" class="dr-cs">KONTRA</span><span id="drSteer" class="muted small"></span></div>
+      <div class="dr-steer"><span id="drCs" class="dr-cs">KONTRA</span><span id="drFull" class="dr-cs hidden">PEŁNY GAZ</span><span id="drSteer" class="muted small"></span></div>
       <div class="dr-total"><small>suma</small><span id="drTotal">0</span></div>
       <div class="speed-small"><span>najlepszy: <b id="drBest">0</b></span><span>przekładki: <b id="drTrans">0</b></span><span>obroty: <b id="drLost">0</b></span></div>
-      <button id="drReset">Zeruj punkty</button>
+      <div class="btnrow"><button id="drReset">Zeruj punkty</button><button id="drSound">🔇 dźwięk</button></div>
     </div>
     <p id="drProfile" class="muted center small"></p>
     <p id="drHint" class="muted center small">Punkty liczy Xiao – przerwy w zasięgu nie gubią wyniku. Długość driftu i kąt dają punkty, przekładka bez utraty driftu podnosi mnożnik, obrót kasuje łańcuch.</p>
@@ -258,6 +258,10 @@
       <label class="switch"><input type="checkbox" id="setDriftSpin"> obrót kasuje punkty łańcucha</label>
       <label>Kierunek skrętu<select id="setSteerSign"><option value="0">automatycznie (nauka w jeździe)</option><option value="1">normalny</option><option value="-1">odwrócony</option></select></label>
       <label class="switch"><input type="checkbox" id="setCsReq"> drift wymaga kontry (gdy skręt podłączony)</label>
+      <label class="switch"><input type="checkbox" id="setFullBonus"> bonus za pełny gaz – gaz ≥ 95 % dłużej niż 1 s: punkty driftu ×1,5 (liczy też Xiao)</label>
+      <label class="switch"><input type="checkbox" id="setSound"> dźwięk odcięcia przy pełnym gazie (ten telefon)</label>
+      <label>Głośność<input id="setVolume" type="range" min="0" max="1" step="0.05"></label>
+      <button id="setSoundTest">▶ Test dźwięku</button>
       <div class="btnrow"><button id="setDriftSave" class="primary">Zapisz</button></div>
       <p class="muted small" id="setMount"></p>
     </div>

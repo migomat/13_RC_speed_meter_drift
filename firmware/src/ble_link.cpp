@@ -145,7 +145,8 @@ static void mount_str(char* b, size_t n) {
            g_mount.sign[2] > 0 ? '+' : '-', AXIS_CH[g_mount.idx[2]], g_mount.yaw_deg,
            g_mount.steer_sign, g_mount_name, mount_store_saved() ? "true" : "false");
   size_t k = strlen(b);
-  snprintf(b + k, n - k, ",\"mount_save_us\":%lu", (unsigned long)mount_store_save_us());
+  snprintf(b + k, n - k, ",\"mount_save_us\":%lu,\"drift_bonus\":%d", (unsigned long)mount_store_save_us(),
+           g_mount.full_bonus);
 }
 
 // MOUNT <forward> <left> <up> <yaw_deg> [<znak skrętu 1/-1/0> [<nazwa profilu>]],
@@ -165,6 +166,7 @@ static bool parse_mount(char** argv, int argc, Mount* m) {
   if (cyc * m->sign[0] * m->sign[1] != m->sign[2]) return false;
   m->yaw_deg = (float)atof(argv[3]);
   m->steer_sign = argc > 4 ? atoi(argv[4]) : g_mount.steer_sign;
+  m->full_bonus = g_mount.full_bonus;   // osobna komenda DRIFT BONUS
   if (argc > 5) {   // nazwa: bez cudzysłowu i ukośnika (trafia do JSON), UTF-8 dozwolone
     size_t n = strlen(argv[5]);
     if (n >= MOUNT_NAME_LEN) return false;
@@ -448,20 +450,20 @@ static void cmd_rerase(Link& l, bool force) {
 }
 
 // Drift jako tablica "d" (kolejność: docs/PROTOCOL.md) – cała linia mieści się w jednej
-// notyfikacji BLE (≤ 243 B; najgorszy przypadek ok. 234 B), więc przy słabym zasięgu nie rozrywa
+// notyfikacji BLE (≤ 243 B; najgorszy przypadek ok. 236 B), więc przy słabym zasięgu nie rozrywa
 // się na kawałki. Dodając pole – policzyć długość z maksymalnymi wartościami.
 static void send_live(Link& l) {
   snprintf(s_out, sizeof(s_out),
            "{\"live\":1,\"v\":%.2f,\"v_max\":%.2f,\"v_front\":%.2f,\"slip\":%d,\"rpm\":%.0f,"
            "\"thr\":%u,\"thr_pct\":%.0f,\"ax\":%.3f,\"state\":\"%s\",\"race\":\"%s\","
-           "\"race_s\":%lu,\"st\":%.0f,\"d\":[%.0f,%d,%.0f,%.0f,%.0f,%.0f,%d,%d,%lu,%lu,%lu,%d,%d]}",
+           "\"race_s\":%lu,\"st\":%.0f,\"d\":[%.0f,%d,%.0f,%.0f,%.0f,%.0f,%d,%d,%lu,%lu,%lu,%d,%d,%d]}",
            g_live.v, g_live.v_max, g_live.v_front, g_live.spinning ? 1 : 0, g_live.rpm,
            g_live.throttle_us, g_live.throttle_pct, g_live.ax_g,
            logger_state_name(), race_state_name(), (unsigned long)race_current_s(),
            g_live.steer_valid ? g_live.steer_pct : 0.0f, g_live.d_pts, g_live.d_mult, g_live.d_total, g_live.d_last, g_live.d_best,
            g_live.d_angle, g_live.d_on ? 1 : 0, g_live.d_chain ? 1 : 0,
            (unsigned long)g_live.d_banks, (unsigned long)g_live.d_lost,
-           (unsigned long)g_live.d_trans, g_live.d_cs ? 1 : 0, g_live.d_steer_sign);
+           (unsigned long)g_live.d_trans, g_live.d_cs ? 1 : 0, g_live.d_steer_sign, g_live.d_full ? 1 : 0);
   if (!l.is_ble) return send_text(l, s_out);
   size_t n = strlen(s_out);
   if (n + 1 >= sizeof(s_out)) return;
@@ -506,6 +508,17 @@ static void handle_line(Link& l, char* line) {
   if (!strcmp(c, "DRIFT") && argc >= 2 && !strcmp(argv[1], "RESET")) {
     s_drift_reset = true;
     return send_text(l, "OK");
+  }
+  if (!strcmp(c, "DRIFT") && argc >= 3 && !strcmp(argv[1], "BONUS")) {   // bonus za pełny gaz (v6)
+    int on = atoi(argv[2]) ? 1 : 0;
+    if (on != g_mount.full_bonus) {
+      g_mount.full_bonus = on;
+      mount_store_request_save();   // część profilu – zostaje po resecie
+    }
+    s_out[0] = '{';
+    mount_str(s_out + 1, sizeof(s_out) - 3);
+    strcat(s_out, "}");
+    return send_text(l, s_out);
   }
   if (!strcmp(c, "MOUNT")) {
     if (argc >= 5) {

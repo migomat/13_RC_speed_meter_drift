@@ -150,6 +150,11 @@ Wibracja i napis przy przekładce, zaliczeniu łańcucha (+punkty) i obrocie.
   liczy z ostatnim profilem, dopóki nie wybierzesz innego. Z drukowaną obudową / gniazdem o stałej
   orientacji kalibracja montażu wystarczy raz na auto. (Wewnętrzny flash z LittleFS odrzucony – zapis
   750–940 ms blokował pętlę pomiaru.)
+* **Bonus za pełny gaz (fw 1.5, aplikacja 1.7):** przełącznik w profilu auta – gaz ≥ 95 % nieprzerwanie
+  dłużej niż 1 s = punkty driftu ×1,5 (`DRIFT_FULL_*`, ten sam algorytm w C/Python/JS, wektor `drift_eights`
+  ma fazy pełnego gazu). **Dźwięk odcięcia**: telefon syntezuje (Web Audio, bez plików) wysokoobrotową
+  czwórkę na ograniczniku (~9000 rpm, odcinanie ~14 Hz, strzały z wydechu), gdy Xiao zgłasza pełny gaz;
+  włącznik 🔊 na zakładce Drift i w ustawieniach (ustawienie telefonu, nie profilu).
 * **Gdzie płytka:** jak najbliżej środka ciężkości (w aucie do driftu przesunięty do tyłu – wyznaczyć
   wagą: odległość od tylnej osi = rozstaw × masa przodu / masa całości, albo balansując auto na pręcie),
   na osi symetrii, płasko i sztywno. Płytka poza środkiem ciężkości mierzy kąt w swoim miejscu (z przodu

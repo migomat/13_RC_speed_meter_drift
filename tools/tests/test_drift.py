@@ -187,3 +187,25 @@ def test_v1_race_has_no_steering():
     r = parse_race((VEC / "race_oval.bin").read_bytes())
     assert r.header["format_version"] == 1 and r.header["steer_neutral_us"] == 0
     assert np.all(r.samples["steer_us"] == 0)
+
+
+def test_full_throttle_bonus():
+    race = parse_race((VEC / "drift_eights.bin").read_bytes())
+    tr = json.loads((VEC / "drift_eights.expected.json").read_text())["truth"]
+    off = drift_score(race, DEFAULT_CONFIG)["summary"]
+    cfg = json.loads(json.dumps(DEFAULT_CONFIG))
+    cfg["drift"]["full_bonus"] = 1
+    on = drift_score(race, cfg)["summary"]
+    assert abs(off["full_drift_s"] - tr["full_drift_s"]) < 0.4
+    assert on["total"] > 1.05 * off["total"]
+    assert (on["chains"], on["transitions"], on["spins"]) == (off["chains"], off["transitions"], off["spins"])
+
+
+def test_c_full_bonus_matches_python(drift_bin):
+    cfg = json.loads(json.dumps(DEFAULT_CONFIG))
+    cfg["drift"]["full_bonus"] = 1
+    py = drift_score(parse_race((VEC / "drift_eights.bin").read_bytes()), cfg)["series"]
+    out = subprocess.check_output([str(drift_bin), str(VEC / "drift_eights.bin"), "+x", "+y", "+z", "0", "0", "1"],
+                                  text=True)
+    rows = np.array([[float(x) for x in ln.split()] for ln in out.splitlines()])
+    assert math.isclose(rows[-1, 4], py["total"][-1], rel_tol=0.01)

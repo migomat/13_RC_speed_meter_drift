@@ -43,6 +43,10 @@ void drift_default_params(DriftParams* p) {
   p->cs_min_pct = DRIFT_CS_MIN_PCT;
   p->cs_required = DRIFT_CS_REQUIRED;
   p->angle_no_cs_deg = DRIFT_ANGLE_NO_CS_DEG;
+  p->full_bonus = DRIFT_FULL_BONUS;
+  p->full_thr_pct = DRIFT_FULL_THR_PCT;
+  p->full_thr_s = DRIFT_FULL_THR_S;
+  p->full_bonus_mult = DRIFT_FULL_BONUS_MULT;
 }
 
 int drift_steer_sign(const DriftState* s, const DriftParams* p) {
@@ -63,6 +67,7 @@ void drift_reset_score(DriftState* s) {
   s->mult = 1;
   s->n_banks = s->n_lost = s->n_trans = 0;
   s->drift_t = s->angle_max = 0.0f;
+  s->full_drift_t = 0.0f;
 }
 
 static void bank(DriftState* s) {
@@ -81,7 +86,7 @@ static void bank(DriftState* s) {
 }
 
 void drift_step(DriftState* s, const DriftParams* p, float dt, float a_fwd, float a_left,
-                float r_dps, int rest_hint, int steer_valid, float steer_raw) {
+                float r_dps, int rest_hint, int steer_valid, float steer_raw, float thr_pct) {
   if (dt <= 0.0f) return;
   if (dt > p->max_dt_s) dt = p->max_dt_s;
   float yaw = p->yaw_offset_deg * DEG2RAD;
@@ -174,6 +179,8 @@ void drift_step(DriftState* s, const DriftParams* p, float dt, float a_fwd, floa
                  angle <= p->spin_angle_deg &&
                  (!gate || s->cs || angle >= p->angle_no_cs_deg);
   s->spin_t = (corner && fabsf(angle) > p->spin_angle_deg) ? s->spin_t + dt : 0.0f;
+  s->full_t = thr_pct >= p->full_thr_pct ? s->full_t + dt : 0.0f;
+  s->full_on = s->full_t >= p->full_thr_s - T_EPS;
 
   if (s->chain && s->spin_t >= p->spin_s - T_EPS) {
     if (p->spin_loses_chain) {
@@ -207,8 +214,10 @@ void drift_step(DriftState* s, const DriftParams* p, float dt, float a_fwd, floa
       }
       s->prev_dir = s->seg_dir;
     }
-    s->pts += s->v * dt * (p->pts_per_m + p->pts_per_m_deg * angle);
+    float bonus = (p->full_bonus && s->full_on) ? p->full_bonus_mult : 1.0f;
+    s->pts += s->v * dt * (p->pts_per_m + p->pts_per_m_deg * angle) * bonus;
     s->drift_t += dt;
+    if (s->full_on) s->full_drift_t += dt;
     if (angle > s->angle_max) s->angle_max = angle;
   } else {
     s->in_drift = 0;

@@ -37,9 +37,11 @@ i gaz w neutrum, steer_raw = skręt [% od neutrum, znak surowy] albo NaN):
  8. drift = łuk ∧ V ≥ min_v_mps ∧ min_angle_deg ≤ θ ≤ spin_angle_deg ∧
     (skręt nieznany ∨ ¬cs_required ∨ kontra ∨ θ ≥ angle_no_cs_deg)
     obrót = łuk ∧ |θ| > spin_angle_deg przez spin_s
- 9. łańcuch (combo): segment driftu w jednym kierunku (s); segment potwierdzony po min_seg_s;
+ 9. pełny gaz: thr ≥ full_thr_pct nieprzerwanie → full_t += dt (inaczej 0); full_on = full_t ≥ full_thr_s;
+    bonus (full_bonus = 1): punkty w drifcie × full_bonus_mult, gdy full_on (sygnał dla dźwięku: full_on)
+10. łańcuch (combo): segment driftu w jednym kierunku (s); segment potwierdzony po min_seg_s;
     potwierdzony segment w przeciwnym kierunku niż poprzedni = przekładka → mnożnik +1 (do max_mult)
-    punkty w drifcie: V·dt·(pts_per_m + pts_per_m_deg·θ)
+    punkty w drifcie: V·dt·(pts_per_m + pts_per_m_deg·θ) [× full_bonus_mult przy bonusie]
     brak driftu dłużej niż chain_gap_s → łańcuch zaliczony: suma += punkty·mnożnik
     (łańcuch bez potwierdzonego segmentu – odrzucony, to szum)
     obrót w trakcie łańcucha → łańcuch stracony (spin_loses_chain) albo zaliczony
@@ -86,6 +88,10 @@ DEFAULT_DRIFT = dict(
     cs_min_pct=8.0,        # [%] skręt od neutrum uznany za kontrę
     cs_required=1,         # 1 = przy znanym skręcie drift wymaga kontry (albo dużego kąta)
     angle_no_cs_deg=35.0,  # [deg] od tego kąta drift liczy się także bez kontry
+    full_bonus=0,          # 1 = bonus za pełny gaz w drifcie (przełącznik w profilu auta)
+    full_thr_pct=95.0,     # [%] gaz uznany za pełny
+    full_thr_s=1.0,        # [s] tak długo nieprzerwanie = pełny gaz (full_on)
+    full_bonus_mult=1.5,   # mnożnik punktów w drifcie przy pełnym gazie
 )
 
 
@@ -102,7 +108,8 @@ def drift_init() -> dict:
         have_bias=False, b_af=0.0, b_al=0.0, b_r=0.0,
         first=True, f_af=0.0, f_al=0.0, f_r=0.0,
         corner=False, corner_t=0.0, r_prev=0.0, v=0.0, vdot=0.0, angle=0.0, spin_t=0.0,
-        steer_ev=0.0, steer_learned=0, steer=math.nan, cs=False,
+        steer_ev=0.0, steer_learned=0, steer=math.nan, cs=False, full_t=0.0, full_on=False,
+        full_drift_t=0.0,
         in_drift=False, seg_t=0.0, seg_dir=0, seg_ok=False,
         chain=False, chain_ok=False, prev_dir=0, grace_t=0.0,
         pts=0.0, mult=1, total=0.0, best=0.0, last=0.0,
@@ -130,7 +137,7 @@ def steer_sign_of(s: dict, p: dict) -> int:
 
 
 def drift_step(s: dict, p: dict, dt: float, a_fwd: float, a_left: float, r_dps: float,
-               rest_hint: bool, steer_raw: float = math.nan) -> None:
+               rest_hint: bool, steer_raw: float = math.nan, thr_pct: float = 0.0) -> None:
     if dt <= 0:
         return
     dt = min(dt, p["max_dt_s"])
@@ -223,6 +230,8 @@ def drift_step(s: dict, p: dict, dt: float, a_fwd: float, a_left: float, r_dps: 
                 and p["min_angle_deg"] <= angle <= p["spin_angle_deg"]
                 and (not gate or s["cs"] or angle >= p["angle_no_cs_deg"]))
     s["spin_t"] = s["spin_t"] + dt if (corner and abs(angle) > p["spin_angle_deg"]) else 0.0
+    s["full_t"] = s["full_t"] + dt if thr_pct >= p["full_thr_pct"] else 0.0
+    s["full_on"] = s["full_t"] >= p["full_thr_s"] - T_EPS
 
     if s["chain"] and s["spin_t"] >= p["spin_s"] - T_EPS:
         if p["spin_loses_chain"]:
@@ -251,8 +260,11 @@ def drift_step(s: dict, p: dict, dt: float, a_fwd: float, a_left: float, r_dps: 
                 s["mult"] = min(s["mult"] + 1, int(p["max_mult"]))
                 s["n_trans"] += 1
             s["prev_dir"] = s["seg_dir"]
-        s["pts"] += s["v"] * dt * (p["pts_per_m"] + p["pts_per_m_deg"] * angle)
+        bonus = p["full_bonus_mult"] if (p["full_bonus"] and s["full_on"]) else 1.0
+        s["pts"] += s["v"] * dt * (p["pts_per_m"] + p["pts_per_m_deg"] * angle) * bonus
         s["drift_t"] += dt
+        if s["full_on"]:
+            s["full_drift_t"] += dt
         s["angle_max"] = max(s["angle_max"], angle)
     else:
         s["in_drift"] = False
@@ -264,7 +276,7 @@ def drift_step(s: dict, p: dict, dt: float, a_fwd: float, a_left: float, r_dps: 
 
 def race_inputs(race, cfg: dict):
     """Wejścia kroku z próbek wyścigu – jak w firmware: dt, a_fwd, a_left [g], ω_up [dps],
-    rest_hint (brak zboczy i gaz w neutrum), steer_raw [% od neutrum, NaN = brak]."""
+    rest_hint (brak zboczy i gaz w neutrum), steer_raw [% od neutrum, NaN = brak], thr_pct [%]."""
     from .analyze import map_axes
 
     h = race.header
@@ -278,19 +290,20 @@ def race_inputs(race, cfg: dict):
     dt = smp["n_ticks"].astype(np.float64) / float(h["tick_rate_hz"])
     rest = _rest_mask(race)
     steer = _steer_pct(race)
-    return dt, af, al, gu, rest, steer
+    return dt, af, al, gu, rest, steer, _thr_pct(race)
 
 
 def drift_score(race, cfg: dict | None = None) -> dict:
     """Przebiegi i podsumowanie punktów za drift dla nagrania wyścigu."""
     cfg = cfg or {}
     p = drift_params(cfg)
-    dt, af, al, gu, rest, steer = race_inputs(race, cfg)
+    dt, af, al, gu, rest, steer, thr = race_inputs(race, cfg)
     n = len(dt)
     s = drift_init()
-    out = {k: np.zeros(n) for k in ("angle", "v", "pts", "mult", "total", "drift", "steer", "cs")}
+    out = {k: np.zeros(n) for k in ("angle", "v", "pts", "mult", "total", "drift", "steer", "cs", "full")}
     for i in range(n):
-        drift_step(s, p, float(dt[i]), float(af[i]), float(al[i]), float(gu[i]), bool(rest[i]), float(steer[i]))
+        drift_step(s, p, float(dt[i]), float(af[i]), float(al[i]), float(gu[i]), bool(rest[i]),
+                   float(steer[i]), float(thr[i]))
         out["angle"][i] = s["angle"]
         out["v"][i] = s["v"] if s["corner"] else 0.0
         out["pts"][i] = s["pts"]
@@ -299,17 +312,28 @@ def drift_score(race, cfg: dict | None = None) -> dict:
         out["drift"][i] = 1.0 if s["in_drift"] else 0.0
         out["steer"][i] = s["steer"]
         out["cs"][i] = 1.0 if s["cs"] else 0.0
+        out["full"][i] = 1.0 if s["full_on"] else 0.0
     # łańcuch trwający na końcu nagrania – zaliczony
     end = dict(s)
     _bank(end)
     summary = dict(total=end["total"], best_chain=end["best"], chains=end["n_banks"],
                    transitions=s["n_trans"], spins=s["n_lost"], drift_time_s=s["drift_t"],
-                   angle_max_deg=s["angle_max"], steer_sign=steer_sign_of(s, p))
+                   angle_max_deg=s["angle_max"], steer_sign=steer_sign_of(s, p),
+                   full_drift_s=s["full_drift_t"])
     out["t"] = race.t_s
     return dict(series=out, summary=summary)
 
 
 # ------------------------------------------------------------------ kalibracja montażu
+def _thr_pct(race) -> np.ndarray:
+    """Gaz [% do przodu] jak w firmware; brak sygnału / nienauczone neutrum → 0."""
+    h = race.header
+    neutral, full = int(h["throttle_neutral_us"]), int(h["throttle_full_us"]) or 500
+    sign = 1.0 if h["throttle_fwd_higher"] else -1.0
+    return np.array([(int(w) - neutral) * 100.0 / full * sign if (w and neutral) else 0.0
+                     for w in race.samples["throttle_us"]], dtype=np.float64)
+
+
 def _rest_mask(race) -> list:
     h = race.header
     smp = race.samples

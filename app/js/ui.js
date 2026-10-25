@@ -9,8 +9,16 @@ import * as db from './storage.js';
 import { syncedCharts, scatterChart, trackMap, PALETTE } from './charts.js';
 import { GitHubStore, syncAll } from './sync.js';
 import { driftScore, mountCalibrate, DRIFT_SUMMARY_LABELS } from './drift.js';
+import { LimiterSound } from './sound.js';
 
-const APP_VERSION = '1.6.0';
+const limiter = new LimiterSound();
+// dźwięk – ustawienie tego urządzenia (nie profilu auta)
+const soundPref = { on: false, volume: 0.5 };
+try { Object.assign(soundPref, JSON.parse(localStorage.getItem('x4f_sound') || '{}')); } catch (e) { /* */ }
+limiter.setVolume(soundPref.volume);
+function saveSoundPref() { try { localStorage.setItem('x4f_sound', JSON.stringify(soundPref)); } catch (e) { /* */ } }
+
+const APP_VERSION = '1.7.0';
 const $ = (id) => document.getElementById(id);
 const fmt = (v, d = 2) => (v == null || Number.isNaN(v) ? '–' : v.toFixed(d).replace('.', ','));
 
@@ -431,6 +439,7 @@ async function sendMount() {
   try {
     const r = await d.mount(state.settings.imu_axes, state.settings.estimator.yaw_offset_deg, st, name);
     if (r && r.mount) state.xiaoMount = { mount: r.mount, saved: !!r.mount_saved };
+    if (proto >= 6) await d.driftBonus(!!state.settings.drift.full_bonus);
     if (r && r.mount && !r.mount_saved) {
       // zapis na Xiao w następnej pętli (albo po nagrywaniu) – potwierdzenie chwilę później
       setTimeout(async () => {
@@ -480,6 +489,11 @@ function renderDrift(m) {
   $('drAngle').textContent = `${Math.round(m.d_ang || 0)}°`;
   $('drAngleBar').style.width = `${a / 90 * 100}%`;
   $('drCs').classList.toggle('on', !!m.d_cs);
+  const full = !!m.d_full;
+  show($('drFull'), m.d_full !== undefined);
+  $('drFull').classList.toggle('on', full);
+  $('drFull').textContent = full && state.settings.drift.full_bonus ? `PEŁNY GAZ ×${fmt(state.settings.drift.full_bonus_mult, 1)}` : 'PEŁNY GAZ';
+  limiter.set(full && soundPref.on && performance.now() - state.live.last < 300);
   show($('drCs'), m.d_cs !== undefined);
   if (m.d_steer_sign === undefined) $('drSteer').textContent = '';
   else if (!m.d_steer_sign) $('drSteer').textContent = 'skręt: kierunek jeszcze nieznany (jedź chwilę z przyczepnością)';
@@ -521,12 +535,14 @@ async function enterSpeed() {
     show($('spdNoSignal'), stale);
     document.querySelector('.speedo').classList.toggle('stale', stale);
     show($('drNoSignal'), stale);
+    if (stale) limiter.set(false);
     document.querySelector('.drift').classList.toggle('stale', stale);
   }, 100);
 }
 
 async function leaveSpeed() {
   clearInterval(speedTimer);
+  limiter.set(false);
   if (!state.downloading) await wakeLock(false);
   if (state.device && !$('liveToggle').checked) { try { await state.device.live(false); } catch (e) { /* */ } }
 }
@@ -1020,6 +1036,9 @@ function renderSettings() {
   $('setDriftSpin').checked = !!s.drift.spin_loses_chain;
   $('setSteerSign').value = String(s.drift.steer_sign || 0);
   $('setCsReq').checked = !!s.drift.cs_required;
+  $('setFullBonus').checked = !!s.drift.full_bonus;
+  $('setSound').checked = !!soundPref.on;
+  $('setVolume').value = soundPref.volume;
   $('setMount').textContent = `Montaż płytki: do przodu ${s.imu_axes.forward}, w lewo ${s.imu_axes.left}, w górę ${s.imu_axes.up}, ` +
     `kąt ${fmt(s.estimator.yaw_offset_deg, 1)}° – kalibracja w szczegółach wyścigu (jazda bez driftu). ` +
     'Znak skrętu i montaż trafiają do Xiao po połączeniu; „wymaga kontry” Xiao bierze z firmware.';
@@ -1042,6 +1061,7 @@ async function saveSettings() {
   s.drift.spin_loses_chain = $('setDriftSpin').checked ? 1 : 0;
   s.drift.steer_sign = parseInt($('setSteerSign').value, 10) || 0;
   s.drift.cs_required = $('setCsReq').checked ? 1 : 0;
+  s.drift.full_bonus = $('setFullBonus').checked ? 1 : 0;
   if (DRIFT_FIELDS.some(([k]) => !(s.drift[k] >= 0))) { $('setMsg').textContent = 'Niepoprawne wartości punktów za drift.'; return; }
   const axesUsed = new Set(Object.values(s.imu_axes).map((a) => a[1]));
   if (axesUsed.size !== 3) { $('setMsg').textContent = 'Każda oś auta musi mieć inną oś płytki.'; return; }
@@ -1276,7 +1296,9 @@ async function init() {
   applyTheme(localStorage.getItem('x4f_theme') || 'auto');
   await loadProfiles();
 
-  document.querySelectorAll('nav.tabs button').forEach((b) => { b.onclick = () => goto(b.dataset.view); });
+  document.querySelectorAll('nav.tabs button').forEach((b) => {
+    b.onclick = () => { if (b.dataset.view === 'drift' && soundPref.on) limiter.unlock(); goto(b.dataset.view); };
+  });
   $('btnConnect').onclick = () => connect('ble');
   $('btnReconnect').onclick = () => connect('ble', { reconnect: true });
   $('btnDemo').onclick = () => connect('demo');
@@ -1313,6 +1335,20 @@ async function init() {
     try { await state.device.driftReset(); state.driftPrev = null; toast('Wyzerowano punkty'); } catch (e) { toast(e.message); }
   };
   $('raceCalib').onclick = () => calibrateFromRace();
+  const renderSoundBtn = () => { $('drSound').textContent = soundPref.on ? '🔊 dźwięk' : '🔇 dźwięk'; };
+  renderSoundBtn();
+  $('drSound').onclick = () => {
+    soundPref.on = !soundPref.on;
+    if (soundPref.on) limiter.unlock(); else limiter.set(false);
+    saveSoundPref(); renderSoundBtn();
+  };
+  $('setSound').onchange = (e) => {
+    soundPref.on = e.target.checked;
+    if (soundPref.on) limiter.unlock(); else limiter.set(false);
+    saveSoundPref(); renderSoundBtn();
+  };
+  $('setVolume').oninput = (e) => { soundPref.volume = parseFloat(e.target.value); limiter.setVolume(soundPref.volume); saveSoundPref(); };
+  $('setSoundTest').onclick = () => limiter.demo();
   $('raceCalibApply').onclick = () => applyCalibration();
   $('setDriftSave').onclick = () => saveSettings();
   $('profSel').onchange = (e) => selectProfile(e.target.value).then(() => toast(`Profil: ${activeProfile().name}`));
