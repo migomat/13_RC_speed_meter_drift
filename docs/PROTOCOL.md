@@ -1,7 +1,7 @@
 # Protokół X4F-LOG (wersja 3)
 
 Wersja 2 (fw 1.1.0) dodaje komendy wyścigów `RLIST`/`RGET`/`RDEL`/`RERASE`/`RSTOP` i pola
-`race_*`. Wersja 3 (fw 1.2.0, drift) dodaje punkty za drift w `LIVE` (`d_*`), `DRIFT RESET`
+`race_*`. Wersja 3 (fw 1.2.0, drift) dodaje punkty za drift w `LIVE` (`d`), `DRIFT RESET`
 i `MOUNT`. Klient sprawdza `proto` z `INFO` – starszy firmware nie zna nowych komend.
 
 Transport BLE: Nordic UART Service (`6e400001-…`), RX `6e400002` (zapis, telefon → Xiao),
@@ -33,10 +33,10 @@ u32 magic 0x42463458 ("X4FB") | u32 seq | u32 offset | u32 len | u32 crc32(dane)
 | `GET <seq> <offset> <len>` | ramka binarna; `len ≤ 4096`; przez BLE przełącza na PHY 2M (szybsze pobieranie) |
 | `DEL <seq>` | `OK DEL <seq>` albo `{"err":"NOT_FOUND","seq":…}` |
 | `ARM` | `OK` – powrót z ERROR do IDLE |
-| `LIVE 1` / `LIVE 0` | `OK`; potem 20 Hz: `{"live":1,"v","v_max","v_front","slip","rpm","thr","thr_pct","ax","zupt","state","race","race_s","d_pts","d_mult","d_total","d_last","d_best","d_ang","d_on","d_chain","d_banks","d_lost","d_trans"}` – `race`: stan zapisu wyścigu, `race_s`: długość bieżącego wyścigu [s]; drift (v3): `d_pts` punkty bieżącego łańcucha (przed mnożnikiem), `d_mult` mnożnik, `d_total` suma, `d_last` ostatni zaliczony łańcuch (×mnożnik), `d_best` najlepszy, `d_ang` kąt driftu [°] (0 poza łukiem), `d_on` drift teraz, `d_chain` łańcuch trwa, liczniki `d_banks` (zaliczone), `d_lost` (obroty), `d_trans` (przekładki). Wynik liczy Xiao – zgubione linie LIVE nic nie zmieniają. `LIVE 1` przez BLE przełącza na PHY 1M (zasięg) |
+| `LIVE 1` / `LIVE 0` | `OK`; potem 20 Hz: `{"live":1,"v","v_max","v_front","slip","rpm","thr","thr_pct","ax","zupt","state","race","race_s","d":[…]}` – `race`: stan zapisu wyścigu, `race_s`: długość bieżącego wyścigu [s]; drift (v3) w tablicy `d` (cała linia mieści się w jednej notyfikacji BLE): `[pts, mult, total, last, best, ang, on, chain, banks, lost, trans]` = punkty bieżącego łańcucha (przed mnożnikiem), mnożnik, suma, ostatni zaliczony łańcuch (×mnożnik), najlepszy, kąt driftu [°] (0 poza łukiem), drift teraz (0/1), łańcuch trwa (0/1), zaliczone łańcuchy, obroty, przekładki. Wynik liczy Xiao – zgubione linie LIVE nic nie zmieniają. `LIVE 1` przez BLE przełącza na PHY 1M (zasięg) |
 | `VMAX RESET` | `OK` |
 | `DRIFT RESET` | `OK` – zerowanie punktów za drift (v3) |
-| `MOUNT [<forward> <left> <up> <yaw_deg>]` | `{"mount":[…]}` (v3) – bez argumentów odczyt; np. `MOUNT +y -x +z -18.5` ustawia montaż płytki dla prędkościomierza i driftu (układ prawoskrętny, \|yaw\| ≤ 180), do wyłączenia zasilania; aplikacja wysyła wynik kalibracji po połączeniu. Zła wartość: `{"err":"BAD_MOUNT"}` |
+| `MOUNT [<forward> <left> <up> <yaw_deg>]` | `{"mount":[…]}` (v3) – bez argumentów odczyt; np. `MOUNT +y -x +z -18.5` ustawia montaż płytki dla prędkościomierza i driftu (układ prawoskrętny, \|yaw\| ≤ 180), do wyłączenia zasilania; zmiana montażu zeruje estymator, filtry i punkty driftu; aplikacja wysyła wynik kalibracji po połączeniu. Zła wartość: `{"err":"BAD_MOUNT"}` |
 | `RLIST` | `{"races":[{"seq","len","crc","unix","boot","uptime_ms","n","end","read"}…],"state","used","size"}` – od najstarszego; `read`: oznaczony jako pobrany; `state`: IDLE / RECORDING / FINISHING / FULL / ERASING / DIRTY / ERROR |
 | `RGET <seq> <offset> <len>` | ramka binarna jak `GET`; dane = plik wyścigu (`docs/FORMAT.md`) |
 | `RDEL <seq>` | `OK RDEL <seq>` – oznacza wyścig jako pobrany (miejsce zwalnia dopiero `RERASE`) |

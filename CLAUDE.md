@@ -668,7 +668,7 @@ połowy flash. Szczegóły formatu: `docs/FORMAT.md`, komendy: `docs/PROTOCOL.md
 ## Punkty za drift (fw 1.2, aplikacja 1.4 – projekt 13_RC_speed_meter_drift)
 
 Zakładka *Drift*: punkty łańcucha (góra), mnożnik (środek), suma (dół). Liczy Xiao (`drift.c`)
-z próbek wyścigu 20 Hz i wysyła w `LIVE` (`d_*`); aplikacja tylko wyświetla. Opis: README.
+z próbek wyścigu 20 Hz i wysyła w `LIVE` (tablica `d`); aplikacja tylko wyświetla. Opis: README.
 
 - Kąt driftu z kierunku przyspieszenia poziomego w łuku, prędkość z promienia V = |a|/|ω| –
   **nie z halla** (koła napędzane w drifcie buksują).

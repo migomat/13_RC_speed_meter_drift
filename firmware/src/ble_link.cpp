@@ -429,13 +429,13 @@ static void cmd_rerase(Link& l, bool force) {
   send_text(l, "OK");
 }
 
+// Drift jako tablica "d" (kolejność: docs/PROTOCOL.md) – cała linia mieści się w jednej
+// notyfikacji BLE (≤ 243 B), więc przy słabym zasięgu nie rozrywa się na kawałki.
 static void send_live(Link& l) {
   snprintf(s_out, sizeof(s_out),
            "{\"live\":1,\"v\":%.3f,\"v_max\":%.3f,\"v_front\":%.3f,\"slip\":%d,\"rpm\":%.0f,"
            "\"thr\":%u,\"thr_pct\":%.1f,\"ax\":%.3f,\"zupt\":%d,\"state\":\"%s\",\"race\":\"%s\","
-           "\"race_s\":%lu,\"d_pts\":%.0f,\"d_mult\":%d,\"d_total\":%.0f,\"d_last\":%.0f,"
-           "\"d_best\":%.0f,\"d_ang\":%.1f,\"d_on\":%d,\"d_chain\":%d,\"d_banks\":%lu,"
-           "\"d_lost\":%lu,\"d_trans\":%lu}",
+           "\"race_s\":%lu,\"d\":[%.0f,%d,%.0f,%.0f,%.0f,%.0f,%d,%d,%lu,%lu,%lu]}",
            g_live.v, g_live.v_max, g_live.v_front, g_live.spinning ? 1 : 0, g_live.rpm,
            g_live.throttle_us, g_live.throttle_pct, g_live.ax_g, g_live.zupt ? 1 : 0,
            logger_state_name(), race_state_name(), (unsigned long)race_current_s(),

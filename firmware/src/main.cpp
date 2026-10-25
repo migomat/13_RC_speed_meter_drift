@@ -253,12 +253,13 @@ void loop() {
   if (vmax_reset_requested()) s_es.v_max = 0.0f;
   if (drift_reset_requested()) drift_reset_score(&s_ds);
   if (mount_changed()) {
-    // bias i odniesienia liczone w starych osiach – od nowa (wynik driftu zostaje)
+    // bias i odniesienia liczone w starych osiach – od nowa
     float vmax = s_es.v_max;
     est_init(&s_es);
     s_es.v_max = vmax;
     s_ds.have_bias = 0;
     s_ds.first = 1;
+    drift_reset_score(&s_ds);   // punkty liczone w złych osiach nic nie znaczą
   }
 
   uint32_t ms = millis();

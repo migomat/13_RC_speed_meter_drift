@@ -369,9 +369,8 @@ export class DemoTransport {
     this.driftI = (i + 1) % dt.length;
     driftStep(this.drift, driftParams(DEFAULT_SETTINGS), dt[i], af[i], al[i], gu[i], rest[i]);
     const s = this.drift;
-    return { d_pts: Math.round(s.pts), d_mult: s.mult, d_total: Math.round(s.total), d_last: Math.round(s.last),
-      d_best: Math.round(s.best), d_ang: s.corner ? +s.angle.toFixed(1) : 0, d_on: s.in_drift ? 1 : 0,
-      d_chain: s.chain ? 1 : 0, d_banks: s.n_banks, d_lost: s.n_lost, d_trans: s.n_trans };
+    return { d: [Math.round(s.pts), s.mult, Math.round(s.total), Math.round(s.last), Math.round(s.best),
+      s.corner ? Math.round(s.angle) : 0, s.in_drift ? 1 : 0, s.chain ? 1 : 0, s.n_banks, s.n_lost, s.n_trans] };
   }
 
   _stopLive() {

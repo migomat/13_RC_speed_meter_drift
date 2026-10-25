@@ -9,6 +9,13 @@ export const FRAME_BINARY = 0x02;
 export const BLOCK_MAGIC = 0x42463458;
 export const GET_BLOCK_MAX = 4096;
 
+// Punkty driftu w LIVE (protokół 3): "d":[pts, mult, total, last, best, ang, on, chain, banks, lost, trans]
+export const LIVE_DRIFT_KEYS = ['d_pts', 'd_mult', 'd_total', 'd_last', 'd_best', 'd_ang', 'd_on', 'd_chain', 'd_banks', 'd_lost', 'd_trans'];
+export function expandLive(m) {
+  if (Array.isArray(m.d)) LIVE_DRIFT_KEYS.forEach((k, i) => { m[k] = m.d[i]; });
+  return m;
+}
+
 export class ProtocolError extends Error {}
 export class BusyError extends ProtocolError {}
 
@@ -48,7 +55,7 @@ export class Device {
 
   _line(line) {
     if (line.startsWith('{"live"')) {
-      if (this.liveCb) { try { this.liveCb(JSON.parse(line)); } catch (e) { /* uszkodzona linia */ } }
+      if (this.liveCb) { try { this.liveCb(expandLive(JSON.parse(line))); } catch (e) { /* uszkodzona linia */ } }
       return;
     }
     const w = this.lineWaiters.shift();
