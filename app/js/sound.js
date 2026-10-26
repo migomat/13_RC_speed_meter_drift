@@ -121,6 +121,21 @@ export class LimiterSound {
     return true;
   }
 
+  // Android/Chrome: AudioContext zostaje na wyjściu, które było aktywne przy jego utworzeniu –
+  // głośnik albo słuchawki BT podłączone później nie dostają dźwięku. Jedyny pewny sposób: nowy kontekst.
+  rebuild() {
+    const old = this.ctx;
+    if (old) {
+      if (this.limSrc) { try { this.limSrc.stop(); } catch (e) { /* */ } }
+      try { old.close(); } catch (e) { /* */ }
+    }
+    this.ctx = null; this.node = null; this.limSrc = null;
+    this.customLimiter = false; this.fallbackOnly = false;
+    this.active = false; this.lastT = 0;
+    this.rpm = IDLE_RPM; this.boost = 0; this.lastThr = 0; this.crackle = 0;
+    return old ? this.unlock() : false;
+  }
+
   async _loadFile(base) {
     for (const ext of ['mp3', 'ogg', 'wav']) {
       try {

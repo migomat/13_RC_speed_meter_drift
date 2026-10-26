@@ -19,7 +19,7 @@ limiter.setVolume(soundPref.volume);
 limiter.setTurbo(soundPref.turbo);
 function saveSoundPref() { try { localStorage.setItem('x4f_sound', JSON.stringify(soundPref)); } catch (e) { /* */ } }
 
-const APP_VERSION = '2.3.0';
+const APP_VERSION = '2.3.1';
 const $ = (id) => document.getElementById(id);
 const fmt = (v, d = 2) => (v == null || Number.isNaN(v) ? '–' : v.toFixed(d).replace('.', ','));
 
@@ -1477,17 +1477,21 @@ async function init() {
   renderSoundBtn();
   $('drSound').onclick = () => {
     soundPref.on = !soundPref.on;
-    if (soundPref.on) limiter.unlock(); else limiter.stop();
+    if (soundPref.on) { limiter.rebuild(); limiter.unlock(); } else limiter.stop();
     saveSoundPref(); renderSoundBtn();
   };
   $('setTurbo').onchange = (e) => { soundPref.turbo = e.target.checked; limiter.setTurbo(soundPref.turbo); saveSoundPref(); };
   $('setSound').onchange = (e) => {
     soundPref.on = e.target.checked;
-    if (soundPref.on) limiter.unlock(); else limiter.stop();
+    if (soundPref.on) { limiter.rebuild(); limiter.unlock(); } else limiter.stop();
     saveSoundPref(); renderSoundBtn();
   };
   $('setVolume').oninput = (e) => { soundPref.volume = parseFloat(e.target.value); limiter.setVolume(soundPref.volume); saveSoundPref(); };
-  $('setSoundTest').onclick = () => limiter.demo();
+  $('setSoundTest').onclick = () => { limiter.rebuild(); limiter.unlock(); limiter.demo(); };
+  // zmiana wyjścia audio (głośnik/słuchawki BT): nowy kontekst na nowym wyjściu
+  const rerouteSound = () => { if (soundPref.on) limiter.rebuild(); };
+  try { navigator.mediaDevices?.addEventListener('devicechange', rerouteSound); } catch (e) { /* */ }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') rerouteSound(); });
   $('raceCalibApply').onclick = () => applyCalibration();
   $('setDriftSave').onclick = () => saveSettings();
   $('profSel').onchange = (e) => selectProfile(e.target.value).then(() => toast(`Profil: ${activeProfile().name}`));

@@ -1,6 +1,6 @@
 // Service worker – praca offline. Wszystkie zasoby lokalne (bez CDN).
 // Zmiana dowolnego pliku aplikacji = podbicie CACHE.
-const CACHE = 'x4f-drift-v2.3.0';
+const CACHE = 'x4f-drift-v2.3.1';
 const ASSETS = [
   './', './index.html', './manifest.webmanifest', './css/app.css',
   './vendor/uPlot.iife.min.js', './vendor/uPlot.min.css',
