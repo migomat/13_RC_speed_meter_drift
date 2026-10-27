@@ -112,7 +112,9 @@ Wibracja i napis przy przekładce, zaliczeniu łańcucha (+punkty) i obrocie.
   **10 kΩ szeregowo przy odczepie**, bez rezystora do masy (jak gaz); masa wspólna. Pin nie koliduje
   z hallem (D1–D3), więc ta sama płytka działa w aucie on-road i w driftowozie bez przelutowania.
   **Kontra** (koła skręcone przeciwnie do obrotu auta) potwierdza drift: przy znanym skręcie drift
-  poniżej 35° liczy się tylko z kontrą, za to próg przyspieszenia spada z 0,3 do 0,15 g (śliskie auto).
+  poniżej 40° liczy się tylko z kontrą, za to próg przyspieszenia spada z 0,3 do 0,1 g (śliskie auto).
+  Od 40° drift liczy się także bez kontry (fw 1.7.1; wcześniej 90°): kontra znika przy każdej przekładce
+  (kierownica przechodzi przez środek) i to rwało łańcuch – jazda 27.10: 5 → 28 przekładek, drift 90 → 127 s.
   **Kierunek skrętu** (normalny / odwrócony serwo) – automatycznie: Xiao uczy się w jeździe (zakręt
   z przyczepnością = skręt w stronę zakrętu, głęboki drift = kontra; 3 s zgodnych dowodów), a
   kalibracja w aplikacji wyznacza go z jazdy bez driftu i wysyła do Xiao (`MOUNT … <znak>`).
@@ -168,10 +170,14 @@ Wibracja i napis przy przekładce, zaliczeniu łańcucha (+punkty) i obrocie.
   skrętu i pełny gaz z Xiao do profilu o tej samej nazwie; wysyła je tylko po świadomej zmianie (kalibracja, Opcje,
   wybór / nazwa profilu – `mount_dirty`). Wcześniej profil z domyślnymi osiami nadpisywał poprawny montaż (dwie jazdy
   25–26.10 bez punktów; z poprawnym montażem jazda 26.10: ~26 000 pkt, 13 przekładek, 1 obrót).
-* **Auto-korekta odchyłki montażu (fw 1.7):** płytka może się przestawiać między jazdami (26.10: o ~13°). Na wprost
+  Aplikacja 2.3.2: przy połączeniu zawsze przejmuje montaż z Xiao (także przy innej nazwie profilu i gdy zapis na
+  Xiao jest w toku – to tam nadpisała Xiao trzeci raz, jazda 27.10); osie i kąt wysyła tylko po kalibracji,
+  ręcznej zmianie osi / kąta albo wyborze innego auta, i pyta o potwierdzenie, gdy osie na Xiao są inne.
+* **Auto-korekta odchyłki montażu (fw 1.7):** na wprost
   z gazem / hamowaniem (|ω| < 8 °/s, koła prosto, |a| ≥ 0,06 g przez 0,3 s) przyspieszenie leży na osi auta – różnica
-  kierunku koryguje odchyłkę (stała czasowa 3 s takiej jazdy), Xiao dopisuje ją do zapisanego montażu po nagraniu.
-  Niezależne sprawdzenie: symetria kątów driftu lewo/prawo dała te same wartości (25.10: ~0°, 26.10: ~+13°).
+  kierunku koryguje odchyłkę (stała czasowa 3 s takiej jazdy) – do wyłączenia zasilania. fw 1.7.0 dopisywał ją do
+  zapisanego montażu; fw 1.7.1 już nie (płytka jest przyklejona na stałe, a dopisywanie zmieniało montaż szumem).
+  Niezależne sprawdzenie: symetria kątów driftu lewo/prawo i jazda na wprost dają zgodnie ~+16° (jazdy 26–27.10).
   Jazda w kółko bez prostych nie daje próbek – kilka przyspieszeń i hamowań na prostej na początku sesji wystarczy.
 * **Gdzie płytka:** jak najbliżej środka ciężkości (w aucie do driftu przesunięty do tyłu – wyznaczyć
   wagą: odległość od tylnej osi = rozstaw × masa przodu / masa całości, albo balansując auto na pręcie),

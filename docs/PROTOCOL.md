@@ -8,7 +8,7 @@ profil auta – nazwa w `MOUNT`, zapis na stałe w QSPI (`mount_saved`), po rese
 Wersja 6 (fw 1.5.0): bonus za pełny gaz – `DRIFT BONUS 0|1` (część profilu), flaga `full` w `d`.
 Wersja 7 (fw 1.6.0): `DRIFT BONUS 0|1 <próg %> <czas s>`, w odpowiedzi `full_pct`, `full_s`.
 Wersja 8 (fw 1.7.0): auto-korekta odchyłki montażu – `trim` w `d` (ostatnie pole, [°]) i `yaw_trim` w `STATUS`;
-Xiao dopisuje korektę do zapisanego montażu (yaw w `MOUNT`), gdy nic się nie nagrywa. Klient sprawdza `proto` z `INFO` – starszy firmware nie zna nowych komend.
+fw 1.7.0 dopisywał korektę do zapisanego montażu (yaw w `MOUNT`), fw 1.7.1 już nie (korekta tylko do wyłączenia). Klient sprawdza `proto` z `INFO` – starszy firmware nie zna nowych komend.
 
 Transport BLE: Nordic UART Service (`6e400001-…`), RX `6e400002` (zapis, telefon → Xiao),
 TX `6e400003` (notyfikacje). Nazwa rozgłoszeniowa `X4F-LOG`. MTU do 247 (payload 244).

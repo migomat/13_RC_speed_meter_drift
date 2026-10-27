@@ -277,7 +277,7 @@ void loop() {
   if (drift_reset_requested()) drift_reset_score(&s_ds);
   // Auto-korekta odchyłki montażu → dopisana do zapisanego montażu, gdy nic się nie nagrywa
   static uint32_t s_fold_ms;
-  if (!race_recording() && !logger_busy() && fabsf(s_ds.trim) >= DRIFT_AY_FOLD_DEG &&
+  if (DRIFT_AY_FOLD && !race_recording() && !logger_busy() && fabsf(s_ds.trim) >= DRIFT_AY_FOLD_DEG &&
       s_ds.trim_t >= DRIFT_AY_FOLD_MIN_S && millis() - s_fold_ms > 10000) {
     float y = g_mount.yaw_deg + s_ds.trim;
     while (y > 180.0f) y -= 360.0f;

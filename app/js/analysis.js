@@ -30,6 +30,7 @@ export const DEFAULT_SETTINGS = {
 const SETTINGS_MIGRATIONS = [
   [['rest_acc_std_g'], 0.02, 0.06],
   [['estimator', 'zupt_acc_g'], 0.04, 0.06],
+  [['drift', 'angle_no_cs_deg'], 90, 40],
 ];
 
 export function mergeSettings(user) {

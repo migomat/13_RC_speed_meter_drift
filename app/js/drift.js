@@ -47,7 +47,7 @@ export const DEFAULT_DRIFT = {
   ay_tau_s: 3.0,          // [s]
   ay_max_err_deg: 35.0,   // [deg]
   ay_max_trim_deg: 45.0,  // [deg]
-  angle_no_cs_deg: 90.0,  // [deg] od tego kąta drift także bez kontry (90 = kontra zawsze przy znanym skręcie)
+  angle_no_cs_deg: 40.0,  // [deg] od tego kąta drift także bez kontry (wcześniej 90 – gubiło przekładki)
   full_bonus: 0,          // 1 = bonus za pełny gaz w drifcie (przełącznik w profilu)
   full_thr_pct: 95.0,     // [%] gaz uznany za pełny
   full_thr_s: 1.0,        // [s] tak długo nieprzerwanie = pełny gaz

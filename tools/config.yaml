@@ -64,7 +64,7 @@ drift:
   learn_drift_deg: 30       # [deg] drift tak głęboki, że skręt = kontra
   cs_min_pct: 8             # [%] skręt od neutrum uznany za kontrę
   cs_required: 1            # 1 = przy znanym skręcie drift wymaga kontry
-  angle_no_cs_deg: 90       # [deg] od tego kąta drift także bez kontry (90 = zawsze kontra)
+  angle_no_cs_deg: 40       # [deg] od tego kąta drift także bez kontry (przyczepność ma kąt ~0)
   auto_yaw: 1               # korekta odchyłki montażu w jeździe (na wprost z gazem / hamowaniem)
   ay_min_g: 0.06            # [g]
   ay_max_dps: 8             # [dps]

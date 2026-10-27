@@ -19,7 +19,7 @@ limiter.setVolume(soundPref.volume);
 limiter.setTurbo(soundPref.turbo);
 function saveSoundPref() { try { localStorage.setItem('x4f_sound', JSON.stringify(soundPref)); } catch (e) { /* */ } }
 
-const APP_VERSION = '2.3.1';
+const APP_VERSION = '2.3.2';
 const $ = (id) => document.getElementById(id);
 const fmt = (v, d = 2) => (v == null || Number.isNaN(v) ? '–' : v.toFixed(d).replace('.', ','));
 
@@ -489,11 +489,25 @@ function onLive(m) {
 // aplikacja PRZEJMUJE montaż z Xiao do profilu o tej samej nazwie; wysyła go tylko po świadomej zmianie
 // (kalibracja, Opcje, wybór / nazwa profilu) – profil ma wtedy mount_dirty, dopóki Xiao nie potwierdzi.
 // (Wcześniej aplikacja wysyłała profil przy każdym połączeniu i nadpisywała poprawny montaż domyślnymi osiami.)
+// (Wersja 2.1–2.3 dalej wysyłała montaż telefonu przy różnej nazwie profilu albo gdy Xiao jeszcze nie
+// zapisał korekty po jeździe – telefon z domyślnymi osiami nadpisał tak Xiao trzeci raz. Teraz osie idą
+// do Xiao tylko po kalibracji, ręcznej zmianie osi / kąta albo wyborze innego auta – i za potwierdzeniem.)
 async function syncMountOnConnect() {
   const i = state.info;
-  if (!i || (i.proto || 1) < 7 || !i.mount || !i.mount_saved || state.settings.mount_dirty ||
-      profileShowName(i.mount[5]) !== activeProfile().name) {
-    return pushMount();
+  if (!i) return;
+  if ((i.proto || 1) < 7 || !i.mount) return pushMount();   // stary firmware nie pamięta montażu
+  if (state.settings.mount_dirty) return pushMount();
+  // profil o nazwie zapamiętanej na Xiao – przełączenie bez wysyłania
+  const xn = profileShowName(i.mount[5]);
+  if (xn && xn !== activeProfile().name) {
+    const p = state.profiles.find((q) => q.name === xn || profileWireName(q.name) === i.mount[5]);
+    if (p) {
+      state.profileId = p.id;
+      await db.kvSet('profile_active', p.id);
+      state.settings = p.settings;
+      state.analysisCache.clear();
+      await db.kvSet('settings', state.settings);
+    }
   }
   const s = mergeSettings(state.settings);
   const before = JSON.stringify([s.imu_axes, s.estimator.yaw_offset_deg, s.drift.steer_sign]);
@@ -506,7 +520,7 @@ async function syncMountOnConnect() {
   s.axes_set = s.axes_set || before !== JSON.stringify([s.imu_axes, s.estimator.yaw_offset_deg, s.drift.steer_sign]) ||
     i.mount[0] !== '+x' || i.mount[1] !== '+y' || +i.mount[3] !== 0;
   await persistSettings(s);
-  state.xiaoMount = { mount: i.mount, saved: true };
+  state.xiaoMount = { mount: i.mount, saved: !!i.mount_saved };
   if (before !== JSON.stringify([s.imu_axes, s.estimator.yaw_offset_deg, s.drift.steer_sign])) {
     toast(`Montaż z Xiao: ${i.mount[0]} ${i.mount[1]} ${i.mount[2]}, ${i.mount[3]}°, skręt ${+i.mount[4] > 0 ? 'normalny' : +i.mount[4] < 0 ? 'odwrócony' : 'auto'}`);
   }
@@ -514,8 +528,11 @@ async function syncMountOnConnect() {
 }
 
 /** Zaznacza zmianę montażu w aktywnym profilu (wyślij przy najbliższej okazji) i wysyła, jeśli połączono. */
-async function markMountDirty() {
-  if (!state.settings.mount_dirty) { const s = mergeSettings(state.settings); s.mount_dirty = true; await persistSettings(s); }
+// axes = true: zmieniono osie / kąt (kalibracja, Opcje, inne auto) – tylko wtedy Xiao dostaje osie telefonu
+async function markMountDirty(axes = false) {
+  if (!state.settings.mount_dirty || (axes && !state.settings.axes_dirty)) {
+    const s = mergeSettings(state.settings); s.mount_dirty = true; if (axes) s.axes_dirty = true; await persistSettings(s);
+  }
   await pushMount();
 }
 
@@ -525,13 +542,29 @@ async function pushMount() {
   const proto = state.info.proto || 1;
   const st = proto >= 4 ? (state.settings.drift.steer_sign || 0) : undefined;
   const name = proto >= 5 ? profileWireName(activeProfile().name) : undefined;
+  // osie i kąt: z Xiao, chyba że użytkownik je zmienił (axes_dirty) – wtedy z potwierdzeniem, gdy osie inne
+  const xm = (state.xiaoMount && state.xiaoMount.mount) || (proto >= 7 && state.info.mount) || null;
+  let axes = state.settings.imu_axes, yaw = state.settings.estimator.yaw_offset_deg;
+  if (xm) {
+    const xa = { forward: xm[0], left: xm[1], up: xm[2] };
+    const differ = xa.forward !== axes.forward || xa.left !== axes.left || xa.up !== axes.up;
+    let useOwn = !!state.settings.axes_dirty;
+    if (useOwn && differ && !window.confirm(`Xiao ma montaż ${xa.forward} ${xa.left} ${xa.up}, ${xm[3]}°.\n` +
+        `Zastąpić go montażem z telefonu: ${axes.forward} ${axes.left} ${axes.up}, ${yaw}°?`)) useOwn = false;
+    if (!useOwn) {
+      axes = xa; yaw = +xm[3] || 0;
+      const s = mergeSettings(state.settings); s.imu_axes = axes; s.estimator.yaw_offset_deg = yaw; await persistSettings(s);
+    }
+  }
   try {
-    const r = await d.mount(state.settings.imu_axes, state.settings.estimator.yaw_offset_deg, st, name);
+    const r = await d.mount(axes, yaw, st, name);
     if (r && r.mount) state.xiaoMount = { mount: r.mount, saved: !!r.mount_saved };
     const dr = state.settings.drift;
     if (proto >= 7) await d.driftBonus(!!dr.full_bonus, dr.full_thr_pct, dr.full_thr_s);
     else if (proto >= 6) await d.driftBonus(!!dr.full_bonus);
-    if (state.settings.mount_dirty) { const s = mergeSettings(state.settings); s.mount_dirty = false; await persistSettings(s); }
+    if (state.settings.mount_dirty || state.settings.axes_dirty) {
+      const s = mergeSettings(state.settings); s.mount_dirty = false; s.axes_dirty = false; await persistSettings(s);
+    }
     if (r && r.mount && !r.mount_saved) {
       // zapis na Xiao w następnej pętli (albo po nagrywaniu) – potwierdzenie chwilę później
       setTimeout(async () => {
@@ -991,7 +1024,7 @@ async function applyCalibration() {
   if (cal.steer_sign) s.drift.steer_sign = cal.steer_sign;
   s.axes_set = true;
   await persistSettings(s);
-  await markMountDirty();
+  await markMountDirty(true);
   show($('raceCalibApply'), false);
   toast(state.device && (state.info?.proto || 1) >= 3 ? 'Montaż zapisany i wysłany do Xiao' : 'Montaż zapisany – trafi do Xiao po połączeniu');
   if (state.currentRace) openRace(state.currentRace.id);
@@ -1205,7 +1238,7 @@ async function saveSettings() {
   if (axesUsed.size !== 3) { $('setMsg').textContent = 'Każda oś auta musi mieć inną oś płytki.'; return; }
   if (!(s.final_drive_ratio > 0 && s.front_tire_diameter_mm > 0 && s.lowpass_hz > 0 && s.race_lowpass_hz > 0)) { $('setMsg').textContent = 'Niepoprawne wartości.'; return; }
   await persistSettings(s);
-  if (mountChanged) await markMountDirty();
+  if (mountChanged) await markMountDirty(axesChanged);
   $('setMsg').textContent = 'Zapisano – wszystkie starty zostaną przeliczone.';
   toast('Zapisano ustawienia');
 }
@@ -1263,7 +1296,7 @@ async function selectProfile(id) {
   state.settings = activeProfile().settings;
   state.analysisCache.clear();
   await db.kvSet('settings', state.settings);
-  await markMountDirty();   // wybór profilu = świadoma zmiana auta → Xiao dostaje ten profil
+  await markMountDirty(true);   // wybór profilu = świadoma zmiana auta → Xiao dostaje ten profil (z potwierdzeniem)
   renderSettings();
 }
 

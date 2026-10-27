@@ -102,8 +102,8 @@ DEFAULT_DRIFT = dict(
     ay_tau_s=3.0,          # [s] stała czasowa korekty (czasu jazdy na wprost z przyspieszeniem)
     ay_max_err_deg=35.0,   # [deg] większa różnica – próbka pominięta (uderzenie, poślizg)
     ay_max_trim_deg=45.0,  # [deg] maks. korekta
-    angle_no_cs_deg=90.0,  # [deg] od tego kąta drift także bez kontry (90 = przy znanym skręcie kontra zawsze;
-                           #   jazda 25.10: 35° przepuszczało szum z jazdy z przyczepnością)
+    angle_no_cs_deg=40.0,  # [deg] od tego kąta drift także bez kontry (wcześniej 90 – gubiło przekładki;
+                           #   kontra znika przy każdej przekładce; przyczepność ma kąt ~0, jazda 26–27.10)
     full_bonus=0,          # 1 = bonus za pełny gaz w drifcie (przełącznik w profilu auta)
     full_thr_pct=95.0,     # [%] gaz uznany za pełny
     full_thr_s=1.0,        # [s] tak długo nieprzerwanie = pełny gaz (full_on)

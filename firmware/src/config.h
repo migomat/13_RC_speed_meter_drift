@@ -7,8 +7,8 @@
 
 #define FW_VERSION_MAJOR    1
 #define FW_VERSION_MINOR    7
-#define FW_VERSION_PATCH    0
-#define FW_VERSION_STR      "1.7.0"
+#define FW_VERSION_PATCH    1
+#define FW_VERSION_STR      "1.7.1"
 
 // ---------------------------------------------------------------- hall
 // Tryb czujnika halla: 1 (tylko linia A) albo 3 (A/B/C).
@@ -192,10 +192,14 @@
 #define DRIFT_AY_TAU_S              3.0f    // [s] stała czasowa korekty
 #define DRIFT_AY_MAX_ERR_DEG        35.0f   // [deg]
 #define DRIFT_AY_MAX_TRIM_DEG       45.0f   // [deg]
-// Xiao dopisuje korektę do zapisanego montażu (MOUNT yaw), gdy ≥ 1° i zebrano ≥ 2 s jazdy na wprost
+// DRIFT_AY_FOLD 1: Xiao dopisuje korektę do zapisanego montażu (MOUNT yaw), gdy ≥ 1° i zebrano ≥ 2 s jazdy
+// na wprost. fw 1.7.1: wył. – płytka przyklejona na stałe, a dopisywanie zmieniało zapisany montaż szumem
+// estymatora; korekta działa tylko do wyłączenia zasilania.
+#define DRIFT_AY_FOLD               0
 #define DRIFT_AY_FOLD_DEG           1.0f
 #define DRIFT_AY_FOLD_MIN_S         2.0f
-#define DRIFT_ANGLE_NO_CS_DEG       90.0f   // [deg] od tego kąta drift także bez kontry (90 = zawsze kontra)
+#define DRIFT_ANGLE_NO_CS_DEG       40.0f   // [deg] od tego kąta drift także bez kontry (fw 1.7.1: 90 → 40 – kontra znika
+                                            // przy każdej przekładce i w głębokim drifcie z kołami prosto; przyczepność ma kąt ~0)
 #define DRIFT_FULL_BONUS            0       // bonus za pełny gaz – domyślnie wył. (profil: DRIFT BONUS 1)
 #define DRIFT_FULL_THR_PCT          95.0f   // [%] gaz uznany za pełny
 #define DRIFT_FULL_THR_S            1.0f    // [s] tak długo nieprzerwanie = pełny gaz

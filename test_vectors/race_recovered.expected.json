@@ -68,7 +68,7 @@
    "ay_tau_s": 3.0,
    "ay_max_err_deg": 35.0,
    "ay_max_trim_deg": 45.0,
-   "angle_no_cs_deg": 90.0,
+   "angle_no_cs_deg": 40.0,
    "full_bonus": 0,
    "full_thr_pct": 95.0,
    "full_thr_s": 1.0,
