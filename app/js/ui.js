@@ -19,7 +19,7 @@ limiter.setVolume(soundPref.volume);
 limiter.setTurbo(soundPref.turbo);
 function saveSoundPref() { try { localStorage.setItem('x4f_sound', JSON.stringify(soundPref)); } catch (e) { /* */ } }
 
-const APP_VERSION = '2.3.2';
+const APP_VERSION = '2.4.0';
 const $ = (id) => document.getElementById(id);
 const fmt = (v, d = 2) => (v == null || Number.isNaN(v) ? '–' : v.toFixed(d).replace('.', ','));
 
@@ -121,7 +121,9 @@ function goto(view) {
       'Montaż nieskalibrowany – kąt driftu będzie błędny. Kilka spokojnych kółek bez driftu → Wyścigi → kalibracja montażu.';
     show($('drWarn'), !state.settings.axes_set);
     const ax = state.settings.imu_axes;
-    $('drProfile').textContent = `profil: ${activeProfile().name} · montaż ${ax.forward} ${ax.left} ${ax.up}, ${fmt(state.settings.estimator.yaw_offset_deg, 1)}°`;
+    const dr = state.settings.drift;
+    $('drProfile').textContent = `profil: ${activeProfile().name} · montaż ${ax.forward} ${ax.left} ${ax.up}, ${fmt(state.settings.estimator.yaw_offset_deg, 1)}°` +
+      ` · hamowanie bokiem ${fmt(dr.dec_coast_g, 2)} / ${fmt(dr.dec_brake_g, 2)} g${dr.dec_auto ? ' (nauka)' : ''}`;
     if (state.live.data) renderDrift(state.live.data);
   }
   if (view === 'settings') renderSettings();
@@ -515,6 +517,11 @@ async function syncMountOnConnect() {
   s.estimator.yaw_offset_deg = +i.mount[3] || 0;
   s.drift.steer_sign = +i.mount[4] || 0;
   if (i.full_pct) s.drift.full_thr_pct = +i.full_pct;
+  if (i.dec_coast !== undefined) {   // protokół ≥ 9: opóźnienia z Xiao (mogły się nauczyć w jeździe)
+    s.drift.dec_coast_g = +i.dec_coast;
+    s.drift.dec_brake_g = +i.dec_brake;
+    s.drift.dec_auto = i.dec_auto ? 1 : 0;
+  }
   if (i.full_s !== undefined) s.drift.full_thr_s = +i.full_s;
   s.drift.full_bonus = i.drift_bonus ? 1 : 0;
   s.axes_set = s.axes_set || before !== JSON.stringify([s.imu_axes, s.estimator.yaw_offset_deg, s.drift.steer_sign]) ||
@@ -561,6 +568,7 @@ async function pushMount() {
     if (r && r.mount) state.xiaoMount = { mount: r.mount, saved: !!r.mount_saved };
     const dr = state.settings.drift;
     if (proto >= 7) await d.driftBonus(!!dr.full_bonus, dr.full_thr_pct, dr.full_thr_s);
+    if (proto >= 9) await d.driftDec(dr.dec_coast_g, dr.dec_brake_g, !!dr.dec_auto);
     else if (proto >= 6) await d.driftBonus(!!dr.full_bonus);
     if (state.settings.mount_dirty || state.settings.axes_dirty) {
       const s = mergeSettings(state.settings); s.mount_dirty = false; s.axes_dirty = false; await persistSettings(s);
@@ -623,8 +631,10 @@ function renderDrift(m) {
   renderSteer(m);
   if (m.d_trim !== undefined) {
     const ax = state.settings.imu_axes;
+    const dr = state.settings.drift;
     $('drProfile').textContent = `profil: ${activeProfile().name} · montaż ${ax.forward} ${ax.left} ${ax.up}, ` +
-      `${fmt(state.settings.estimator.yaw_offset_deg, 1)}°` + (Math.abs(m.d_trim) >= 0.5 ? ` · korekta w jeździe ${m.d_trim > 0 ? '+' : ''}${Math.round(m.d_trim)}°` : '');
+      `${fmt(state.settings.estimator.yaw_offset_deg, 1)}°` + (Math.abs(m.d_trim) >= 0.5 ? ` · korekta w jeździe ${m.d_trim > 0 ? '+' : ''}${Math.round(m.d_trim)}°` : '') +
+      ` · hamowanie bokiem ${fmt(dr.dec_coast_g, 2)} / ${fmt(dr.dec_brake_g, 2)} g${dr.dec_auto ? ' (nauka)' : ''}`;
   }
 }
 
@@ -1173,6 +1183,7 @@ const DRIFT_FIELDS = [
   ['max_mult', 'Maks. mnożnik'], ['min_acc_g', 'Min. przyspieszenie boczne [g]'], ['min_v_mps', 'Min. prędkość [m/s]'],
   ['spin_angle_deg', 'Kąt obrotu (utrata) [°]'],
   ['full_thr_pct', 'Pełny gaz od [%] (dźwięk odcięcia i bonus)'], ['full_thr_s', 'Bonus po [s] pełnego gazu'],
+  ['dec_coast_g', 'Hamowanie bokiem bez gazu [g] (profil auta)'], ['dec_brake_g', 'Hamowanie bokiem na hamulcu [g] (profil auta)'],
 ];
 const EST_FIELDS = [
   ['yaw_offset_deg', 'Kąt montażu w poziomie [°]'], ['zupt_ms', 'ZUPT – czas bezruchu [ms]'],
@@ -1201,6 +1212,7 @@ function renderSettings() {
   $('setSteerSign').value = String(s.drift.steer_sign || 0);
   $('setCsReq').checked = !!s.drift.cs_required;
   $('setFullBonus').checked = !!s.drift.full_bonus;
+  $('setDecAuto').checked = !!s.drift.dec_auto;
   $('setSound').checked = !!soundPref.on;
   $('setTurbo').checked = !!soundPref.turbo;
   $('setVolume').value = soundPref.volume;
@@ -1227,12 +1239,16 @@ async function saveSettings() {
   s.drift.steer_sign = parseInt($('setSteerSign').value, 10) || 0;
   s.drift.cs_required = $('setCsReq').checked ? 1 : 0;
   s.drift.full_bonus = $('setFullBonus').checked ? 1 : 0;
+  s.drift.dec_auto = $('setDecAuto').checked ? 1 : 0;
   const old = state.settings;
   // osie / kąt / skręt / pełny gaz zmienione ręcznie → wysłać do Xiao (mount_dirty)
   const axesChanged = JSON.stringify(old.imu_axes) !== JSON.stringify(s.imu_axes) || old.estimator.yaw_offset_deg !== s.estimator.yaw_offset_deg;
   if (axesChanged) s.axes_set = true;
   const mountChanged = axesChanged || old.drift.steer_sign !== s.drift.steer_sign || old.drift.full_bonus !== s.drift.full_bonus ||
-    old.drift.full_thr_pct !== s.drift.full_thr_pct || old.drift.full_thr_s !== s.drift.full_thr_s;
+    old.drift.full_thr_pct !== s.drift.full_thr_pct || old.drift.full_thr_s !== s.drift.full_thr_s ||
+    old.drift.dec_coast_g !== s.drift.dec_coast_g || old.drift.dec_brake_g !== s.drift.dec_brake_g ||
+    old.drift.dec_auto !== s.drift.dec_auto;
+  if (!(s.drift.dec_coast_g <= 0.3 && s.drift.dec_brake_g <= 0.3)) { $('setMsg').textContent = 'Hamowanie bokiem: 0–0,3 g.'; return; }
   if (DRIFT_FIELDS.some(([k]) => !(s.drift[k] >= 0))) { $('setMsg').textContent = 'Niepoprawne wartości punktów za drift.'; return; }
   const axesUsed = new Set(Object.values(s.imu_axes).map((a) => a[1]));
   if (axesUsed.size !== 3) { $('setMsg').textContent = 'Każda oś auta musi mieć inną oś płytki.'; return; }

@@ -24,6 +24,7 @@ struct LiveData {
   bool     steer_valid;
   bool     d_full;              // pełny gaz ≥ DRIFT_FULL_THR_S (bonus, dźwięk odcięcia)
   float    d_trim;              // [deg] bieżąca auto-korekta odchyłki montażu (jeszcze niedopisana)
+  float    d_dec_c, d_dec_b;    // [g] opóźnienie bokiem w użyciu (puszczony gaz / hamulec; nauczone lub z profilu)
 };
 // Montaż płytki (main.cpp): osie auta forward/left/up = oś płytki idx (0=x,1=y,2=z) · znak
 struct Mount {
@@ -34,6 +35,9 @@ struct Mount {
   int   full_bonus;   // 1 = bonus za pełny gaz w drifcie (DRIFT BONUS)
   float full_thr_pct; // [%] gaz uznany za pełny (profil – auto ograniczone w aparaturze, np. 67 %)
   float full_thr_s;   // [s] tak długo nieprzerwanie = bonus
+  float dec_coast_g;  // [g] opóźnienie bokiem na puszczonym gazie (DRIFT DEC, nauka dopisuje)
+  float dec_brake_g;  // [g] na hamulcu
+  int   dec_auto;     // 1 = nauka opóźnień w jeździe
 };
 extern Mount g_mount;
 extern LiveData g_live;
@@ -48,5 +52,6 @@ bool ble_connected(void);
 bool vmax_reset_requested(void);
 bool drift_reset_requested(void);
 bool mount_changed(void);      // MOUNT zmienił osie/kąt – estymator i filtry driftu od nowa
+bool dec_changed(void);        // DRIFT DEC – opóźnienia z profilu zamiast nauczonych
 // Wołane w trakcie czekania na bufor BLE (odczyt IMU, takty) – pomiar nie staje
 void ble_set_wait_hook(void (*fn)(void));

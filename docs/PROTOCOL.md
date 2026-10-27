@@ -8,7 +8,12 @@ profil auta – nazwa w `MOUNT`, zapis na stałe w QSPI (`mount_saved`), po rese
 Wersja 6 (fw 1.5.0): bonus za pełny gaz – `DRIFT BONUS 0|1` (część profilu), flaga `full` w `d`.
 Wersja 7 (fw 1.6.0): `DRIFT BONUS 0|1 <próg %> <czas s>`, w odpowiedzi `full_pct`, `full_s`.
 Wersja 8 (fw 1.7.0): auto-korekta odchyłki montażu – `trim` w `d` (ostatnie pole, [°]) i `yaw_trim` w `STATUS`;
-fw 1.7.0 dopisywał korektę do zapisanego montażu (yaw w `MOUNT`), fw 1.7.1 już nie (korekta tylko do wyłączenia). Klient sprawdza `proto` z `INFO` – starszy firmware nie zna nowych komend.
+fw 1.7.0 dopisywał korektę do zapisanego montażu (yaw w `MOUNT`), fw 1.7.1 już nie (korekta tylko do wyłączenia).
+Wersja 9 (fw 1.8.0): `DRIFT DEC <puszczony gaz g> <hamulec g> <nauka 0|1>` – opóźnienie bokiem w drifcie (profil,
+zapis na stałe); w `INFO` / odpowiedziach `MOUNT` i `DRIFT` pola `dec_coast`, `dec_brake`, `dec_auto`, w `STATUS`
+`dec_coast_now`, `dec_brake_now` (w użyciu – nauczone). Nauka zapisuje nowe wartości w profilu poza nagrywaniem
+(≥ 2 s nauki, zmiana ≥ 0,005 g). `RLIST [<od indeksu>]`: gdy lista nie mieści się w odpowiedzi, pole `next` = indeks
+dalszej części, `count` = liczba wyścigów (wcześniej lista była ucinana bez znaku). Klient sprawdza `proto` z `INFO` – starszy firmware nie zna nowych komend.
 
 Transport BLE: Nordic UART Service (`6e400001-…`), RX `6e400002` (zapis, telefon → Xiao),
 TX `6e400003` (notyfikacje). Nazwa rozgłoszeniowa `X4F-LOG`. MTU do 247 (payload 244).
@@ -42,9 +47,10 @@ u32 magic 0x42463458 ("X4FB") | u32 seq | u32 offset | u32 len | u32 crc32(dane)
 | `LIVE 1` / `LIVE 0` | `OK`; potem 20 Hz: `{"live":1,"v","v_max","v_front","slip","rpm","thr","thr_pct","ax","state","race","race_s","st","d":[…]}` – `race`: stan zapisu wyścigu, `race_s`: długość bieżącego wyścigu [s]; `st`: skręt [%] (+ = w lewo, gdy znak znany; inaczej znak surowy; 0 = brak sygnału); drift w tablicy `d`: `[pts, mult, total, last, best, ang, on, chain, banks, lost, trans, cs, steer_sign, full, trim]` = punkty bieżącego łańcucha (przed mnożnikiem), mnożnik, suma, ostatni zaliczony łańcuch (×mnożnik), najlepszy, kąt driftu [°] (0 poza łukiem), drift teraz (0/1), łańcuch trwa (0/1), zaliczone łańcuchy, obroty, przekładki, kontra (0/1), znak skrętu w użyciu (1/−1, 0 = nieznany), pełny gaz ≥ czas (0/1, v6 – bonus), bieżąca auto-korekta odchyłki montażu [°] (v8). Cała linia mieści się w jednej notyfikacji BLE (najgorszy przypadek ok. 241 B z `\n`). Wynik liczy Xiao – zgubione linie LIVE nic nie zmieniają. `LIVE 1` przez BLE przełącza na PHY 1M (zasięg) |
 | `VMAX RESET` | `OK` |
 | `DRIFT RESET` | `OK` – zerowanie punktów za drift (v3) |
+| `DRIFT DEC <g> <g> 0\|1` | `{"mount":…,"dec_coast","dec_brake","dec_auto"}` (v9) – opóźnienie bokiem w drifcie na puszczonym gazie / hamulcu i nauka w jeździe; część profilu |
 | `DRIFT BONUS 0\|1` | `{"mount":…,"drift_bonus":…}` (v6) – bonus za pełny gaz: gaz ≥ 95 % nieprzerwanie ≥ 1 s → punkty w drifcie ×1,5; zapisywany z profilem (zostaje po resecie) |
 | `MOUNT [<forward> <left> <up> <yaw_deg> [<znak skrętu> [<nazwa>]]]` | `{"mount":[f, l, u, yaw, znak, "nazwa"],"mount_saved":…,"mount_save_us":…}` – bez argumentów odczyt; np. `MOUNT +y -x +z -18.5 -1 driftowóz` ustawia montaż płytki dla prędkościomierza i driftu (układ prawoskrętny, \|yaw\| ≤ 180), znak skrętu (v4: 1 normalny, −1 odwrócony, 0 = nauka w jeździe) i nazwę profilu auta (v5: bez spacji, bez `"` i `\`, < 24 B UTF-8; aplikacja zamienia spacje na `_`). Od v5 Xiao zapisuje profil na stałe (QSPI, rekord ~2 ms, tylko gdy nic się nie nagrywa) i po resecie wczytuje ostatni; ten sam profil wysłany ponownie niczego nie zapisuje. Zmiana montażu lub znaku skrętu zeruje estymator, filtry, punkty driftu i nauczony znak skrętu. Zła wartość: `{"err":"BAD_MOUNT"}` |
-| `RLIST` | `{"races":[{"seq","len","crc","unix","boot","uptime_ms","n","end","read"}…],"state","used","size"}` – od najstarszego; `read`: oznaczony jako pobrany; `state`: IDLE / RECORDING / FINISHING / FULL / ERASING / DIRTY / ERROR |
+| `RLIST [od]` | `{"races":[{"seq","len","crc","unix","boot","uptime_ms","n","end","read"}…],"state","used","size","count"[,"next"]}` (v9: `next` – dalsza część listy od tego indeksu) – od najstarszego; `read`: oznaczony jako pobrany; `state`: IDLE / RECORDING / FINISHING / FULL / ERASING / DIRTY / ERROR |
 | `RGET <seq> <offset> <len>` | ramka binarna jak `GET`; dane = plik wyścigu (`docs/FORMAT.md`) |
 | `RDEL <seq>` | `OK RDEL <seq>` – oznacza wyścig jako pobrany (miejsce zwalnia dopiero `RERASE`) |
 | `RERASE [FORCE]` | `OK` – kasowanie całego obszaru wyścigów w tle (< 0,3 s); `{"err":"UNREAD",…}` gdy są niepobrane wyścigi albo obszar `DIRTY` (wtedy tylko `FORCE`); `{"err":"BUSY"}` w trakcie nagrywania wyścigu |

@@ -681,6 +681,8 @@ z próbek wyścigu 20 Hz i wysyła w `LIVE` (tablica `d`); aplikacja tylko wyśw
 - Skręt (fw 1.3, pin D7 – osobny od halla, oba tryby `HALL_LINES`): kontra potwierdza drift; kierunek skrętu automatycznie
   (nauka w drift.c, kalibracja) albo ręcznie – nigdy nie zgadywać na stałe. Format wyścigu 2 (22 B).
 - Auto do driftu może nie mieć halla: nic w drifcie nie może wymagać zboczy (postój z IMU + gaz).
+- Puszczony gaz / hamulec (fw 1.8): kąt poprawiany o opóźnienie bokiem (`dec_coast_g` / `dec_brake_g` – profil auta,
+  komenda `DRIFT DEC`, opcjonalna nauka w jeździe) i podtrzymywany kontrą (`hold_*`); wektor `drift_lift`.
 - Profile aut (aplikacja 1.6): aktywny profil → `MOUNT … <nazwa>`; Xiao zapisuje go na stałe w `CFG_AREA`
   (ostatni blok QSPI, rekordy 64 B, `mount_store.cpp`) – zapis tylko poza nagrywaniem i bez blokowania.
 

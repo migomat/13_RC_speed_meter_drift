@@ -52,6 +52,19 @@ export const DEFAULT_DRIFT = {
   full_thr_pct: 95.0,     // [%] gaz uznany za pełny
   full_thr_s: 1.0,        // [s] tak długo nieprzerwanie = pełny gaz
   full_bonus_mult: 1.5,   // mnożnik punktów w drifcie przy pełnym gazie
+  // puszczony gaz / hamulec w drifcie (fw 1.8) – opis w drift.py
+  dec_on: 1,              // poprawka kąta o opóźnienie wzdłuż toru
+  dec_thr_pct: 5.0,       // [%] gaz ≤ = puszczony
+  dec_brake_pct: -5.0,    // [%] gaz < = hamulec
+  dec_coast_g: 0.12,      // [g] opóźnienie bokiem bez gazu (profil)
+  dec_brake_g: 0.16,      // [g] opóźnienie bokiem na hamulcu (profil)
+  dec_max_g: 0.3,         // [g] ograniczenie nauki
+  dec_auto: 0,            // nauka opóźnień w jeździe (profil)
+  dec_learn_win_s: 0.6,   // [s] okno po puszczeniu gazu
+  dec_learn_tau_s: 10.0,  // [s] stała czasowa nauki
+  dec_pre_tau_s: 0.3,     // [s] filtr kąta na gazie
+  hold_on: 1,             // kontra podtrzymuje drift bez gazu
+  hold_tau_s: 1.0,        // [s] zanik podtrzymanego kąta
 };
 
 export function driftParams(settings) {
@@ -71,6 +84,7 @@ export function driftInit() {
     chain: false, chain_ok: false, prev_dir: 0, grace_t: 0,
     pts: 0, mult: 1, total: 0, best: 0, last: 0,
     n_banks: 0, n_lost: 0, n_trans: 0, drift_t: 0, angle_max: 0,
+    dec_set: false, dec_c: 0, dec_b: 0, dec_learn_t: 0, lift_t: 0, pre_ok: false, pre_ang: 0, hold_ang: 0,
   };
 }
 
@@ -161,6 +175,10 @@ export function driftStep(s, p, dt, aFwd, aLeft, rDps, restHint, steerRaw = NaN,
 
   const amag = Math.sqrt(fa * fa + fl * fl);
   const rr = Math.abs(fr);
+  const lift = thrPct <= p.dec_thr_pct;
+  const brake = thrPct < p.dec_brake_pct;
+  // kontra bez progu łuku (geo wystarcza)
+  const csNow = (dd) => steerOk && Math.abs(s.steer) >= p.cs_min_pct && ((s.steer > 0) === (dd < 0));
   const geo = rr >= p.min_yaw_dps && amag >= p.min_acc_cs_g;
   const corner = geo && amag >= (gate ? p.min_acc_cs_g : p.min_acc_g);
   let angle = 0, d = 0;
@@ -179,11 +197,31 @@ export function driftStep(s, p, dt, aFwd, aLeft, rDps, restHint, steerRaw = NaN,
     }
     const sg = fr >= 0 ? 1 : -1;
     const b0 = -sg * Math.atan2(fa, fl * sg);
-    const at = s.vdot / G;
+    let at = s.vdot / G;
+    if (!s.dec_set) {
+      s.dec_c = p.dec_coast_g;
+      s.dec_b = p.dec_brake_g;
+      s.dec_set = true;
+    }
+    let dec = 0;
+    if (p.dec_on && lift) {
+      dec = brake ? s.dec_b : s.dec_c;
+      at = 0;
+    }
     const fa2 = fa - at * Math.cos(b0);
     const fl2 = fl - at * Math.sin(b0);
     angle = Math.atan2(fa2, fl2 * sg) / D2R;
+    const raw = angle;
+    if (dec > 0) angle += Math.atan2(dec, Math.sqrt(Math.max(amag * amag - dec * dec, 0))) / D2R;
     d = fr >= 0 ? 1 : -1;
+    if (p.dec_auto && p.dec_on && lift && s.lift_t <= p.dec_learn_win_s + T_EPS && s.pre_ok && csNow(d)) {
+      const diff = Math.max(0, Math.min(80, s.pre_ang - raw));
+      const ds = amag * Math.sin(diff * D2R);
+      const k = dt / (p.dec_learn_tau_s + dt);
+      const key = brake ? 'dec_b' : 'dec_c';
+      s[key] = Math.max(0, Math.min(p.dec_max_g, s[key] + k * (ds - s[key])));
+      s.dec_learn_t += dt;
+    }
   } else {
     s.vdot = 0;
     s.corner_t = 0;
@@ -204,8 +242,32 @@ export function driftStep(s, p, dt, aFwd, aLeft, rDps, restHint, steerRaw = NaN,
   const st = s.steer;
   s.cs = corner && steerOk && Math.abs(st) >= p.cs_min_pct && ((st > 0) === (d < 0));
   s.cool_t = Math.max(0, s.cool_t - dt);
-  const drifting = corner && s.v >= p.min_v_mps && s.cool_t <= T_EPS && angle >= p.min_angle_deg && angle <= p.spin_angle_deg &&
+  let drifting = corner && s.v >= p.min_v_mps && s.cool_t <= T_EPS && angle >= p.min_angle_deg && angle <= p.spin_angle_deg &&
     (!gate || s.cs || angle >= p.angle_no_cs_deg);
+  // kąt na gazie przed puszczeniem (nauka opóźnienia) i podtrzymanie driftu kontrą
+  if (!lift) {
+    if (drifting) {
+      s.pre_ang = s.pre_ok ? s.pre_ang + dt / (p.dec_pre_tau_s + dt) * (angle - s.pre_ang) : angle;
+      s.pre_ok = true;
+    } else {
+      s.pre_ok = false;
+    }
+  } else if (!(drifting || s.in_drift)) {
+    s.pre_ok = false;
+  }
+  s.lift_t = lift ? s.lift_t + dt : 0;
+  if (p.hold_on && s.in_drift && lift && geo && csNow(d) && s.cool_t <= T_EPS &&
+      Math.abs(angle) <= p.spin_angle_deg) {
+    // kąt nie spada szybciej niż zanik podtrzymania (po puszczeniu gazu kąt z IMU spada płynnie)
+    s.hold_ang = Math.max(s.hold_ang * Math.exp(-dt / p.hold_tau_s), angle);
+    if (s.hold_ang >= p.min_angle_deg) {
+      angle = s.hold_ang;
+      s.angle = angle;
+      drifting = true;
+    }
+  } else if (drifting) {
+    s.hold_ang = angle;
+  }
   s.spin_t = (corner && Math.abs(angle) > p.spin_angle_deg) ? s.spin_t + dt : 0;
   s.full_t = thrPct >= p.full_thr_pct ? s.full_t + dt : 0;
   s.full_on = s.full_t >= p.full_thr_s - T_EPS;
@@ -333,7 +395,9 @@ export function driftScore(race, settings) {
   bank(end);
   const summary = { total: end.total, best_chain: end.best, chains: end.n_banks, transitions: s.n_trans,
     spins: s.n_lost, drift_time_s: s.drift_t, angle_max_deg: s.angle_max, steer_sign: steerSignOf(s, p),
-    full_drift_s: s.full_drift_t, yaw_trim_deg: s.trim, yaw_trim_time_s: s.trim_t };
+    full_drift_s: s.full_drift_t, yaw_trim_deg: s.trim, yaw_trim_time_s: s.trim_t,
+    dec_coast_g: s.dec_set ? s.dec_c : p.dec_coast_g, dec_brake_g: s.dec_set ? s.dec_b : p.dec_brake_g,
+    dec_learn_s: s.dec_learn_t };
   out.t = race.t_s;
   return { series: out, summary };
 }

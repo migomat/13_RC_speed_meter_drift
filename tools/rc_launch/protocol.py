@@ -266,8 +266,21 @@ class Device:
                             f"{yaw_offset_deg:.1f}{st}")
 
     def list_races(self):
-        """Wyścigi (protokół ≥ 2): lista i stan obszaru."""
-        return self.command("RLIST")
+        """Wyścigi (protokół ≥ 2): lista i stan obszaru. Protokół ≥ 9: lista w częściach ("next");
+        starszy firmware ucinał ją bez znaku."""
+        r = self.command("RLIST")
+        nxt = r.pop("next", None)
+        while nxt is not None:
+            q = self.command(f"RLIST {nxt}")
+            if not q.get("races"):
+                break
+            r["races"] += q["races"]
+            nxt = q.get("next")
+        return r
+
+    def drift_dec(self, coast_g: float, brake_g: float, auto: bool):
+        """Opóźnienie bokiem w drifcie [g] – puszczony gaz, hamulec – i nauka w jeździe (protokół ≥ 9)."""
+        return self.command(f"DRIFT DEC {coast_g:.3f} {brake_g:.3f} {1 if auto else 0}")
 
     def get_block(self, seq: int, offset: int, length: int, timeout: float = 5.0,
                   cmd: str = "GET") -> bytes:

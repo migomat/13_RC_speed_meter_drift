@@ -35,6 +35,14 @@ i gaz w neutrum, steer_raw = skręt [% od neutrum, znak surowy] albo NaN):
  6. s = znak ω; θ0 = atan2(af, al·s); β0 = −s·θ0 (kierunek prędkości w osiach auta)
     usunięcie przyspieszenia stycznego: af −= V'/G·cos β0, al −= V'/G·sin β0
     θ = atan2(af, al·s) [deg] – kąt driftu, > 0 = nadsterowność (tył na zewnątrz)
+ 6a. puszczony gaz / hamulec (dec_on, thr ≤ dec_thr_pct): auto zwalnia wzdłuż toru, przyspieszenie
+    przestaje być prostopadłe do prędkości i θ wychodzi za mały (nawet ujemny). Opóźnienie D [g] =
+    dec_b (thr < dec_brake_pct) albo dec_c (inaczej) – z profilu albo nauczone; V' = 0 (krok 6 bez
+    poprawki) i θ += atan2(D, √max(|a|² − D², 0))
+ 6b. nauka D (dec_auto): prawdziwy kąt nie skacze przy puszczeniu gazu. Przez dec_learn_win_s od
+    puszczenia gazu (lift_t), gdy przed puszczeniem był drift na gazie (pre_ok, kąt pre_ang – filtr
+    dec_pre_tau_s) i jest kontra: D_próbka = |a|·sin(clamp(pre_ang − θ_surowy, 0, 80°)),
+    D += (D_próbka − D)·dt/(dec_learn_tau_s + dt), 0 ≤ D ≤ dec_max_g; dec_learn_t += dt
  7. nauka znaku skrętu (steer_sign = 0, jeszcze nieznany, |steer_raw| ≥ cs_min_pct, geo;
     kąt wymaga skalibrowanego montażu):
     |θ| < min_angle_deg (przyczepność – skręt w stronę zakrętu): ev += dt·znak(steer_raw·ω)
@@ -43,6 +51,10 @@ i gaz w neutrum, steer_raw = skręt [% od neutrum, znak surowy] albo NaN):
  8. drift = łuk ∧ V ≥ min_v_mps ∧ min_angle_deg ≤ θ ≤ spin_angle_deg ∧
     (skręt nieznany ∨ ¬cs_required ∨ kontra ∨ θ ≥ angle_no_cs_deg)
     obrót = łuk ∧ |θ| > spin_angle_deg przez spin_s; potem spin_cooldown_s bez driftu
+ 8a. podtrzymanie (hold_on): drift trwał, gaz puszczony, geo, kontra, bez przerwy po obrocie
+    i |θ| ≤ spin_angle_deg → hold_ang = max(hold_ang·exp(−dt/hold_tau_s), θ) (poza tym hold_ang = kąt
+    ostatniej próbki driftu); hold_ang ≥ min_angle_deg → drift z θ = hold_ang – kąt po puszczeniu gazu
+    nie spada szybciej niż zanik (z IMU spada płynnie i bez tego podtrzymanie startowałoby od ~15°)
  9. pełny gaz: thr ≥ full_thr_pct nieprzerwanie → full_t += dt (inaczej 0); full_on = full_t ≥ full_thr_s;
     bonus (full_bonus = 1): punkty w drifcie × full_bonus_mult, gdy full_on (sygnał dla dźwięku: full_on)
 10. łańcuch (combo): segment driftu w jednym kierunku (s); segment potwierdzony po min_seg_s;
@@ -108,6 +120,20 @@ DEFAULT_DRIFT = dict(
     full_thr_pct=95.0,     # [%] gaz uznany za pełny
     full_thr_s=1.0,        # [s] tak długo nieprzerwanie = pełny gaz (full_on)
     full_bonus_mult=1.5,   # mnożnik punktów w drifcie przy pełnym gazie
+    # puszczony gaz / hamulec w drifcie (fw 1.8): opóźnienie wzdłuż toru psuje kąt (jazdy 27.10:
+    # drift liczony w 46 % obrotu na puszczonym gazie i 14 % na hamulcu, kąt średnio −34° / −42°)
+    dec_on=1,              # 1 = poprawka kąta o opóźnienie
+    dec_thr_pct=5.0,       # [%] gaz ≤ tego = puszczony
+    dec_brake_pct=-5.0,    # [%] gaz < tego = hamulec
+    dec_coast_g=0.12,      # [g] opóźnienie bokiem na puszczonym gazie (profil; na prostej tylko ~0,03)
+    dec_brake_g=0.16,      # [g] opóźnienie bokiem na hamulcu (profil; na prostej ~0,1)
+    dec_max_g=0.3,         # [g] ograniczenie nauki
+    dec_auto=0,            # 1 = nauka opóźnień w jeździe (profil)
+    dec_learn_win_s=0.6,   # [s] okno po puszczeniu gazu, w którym kąt porównywany z kątem na gazie
+    dec_learn_tau_s=10.0,  # [s] stała czasowa nauki (czasu próbek nauki)
+    dec_pre_tau_s=0.3,     # [s] filtr kąta driftu na gazie (przed puszczeniem)
+    hold_on=1,             # 1 = kontra podtrzymuje drift na puszczonym gazie / hamulcu
+    hold_tau_s=1.0,        # [s] zanik podtrzymanego kąta
 )
 
 
@@ -130,6 +156,8 @@ def drift_init() -> dict:
         chain=False, chain_ok=False, prev_dir=0, grace_t=0.0,
         pts=0.0, mult=1, total=0.0, best=0.0, last=0.0,
         n_banks=0, n_lost=0, n_trans=0, drift_t=0.0, angle_max=0.0,
+        dec_set=False, dec_c=0.0, dec_b=0.0, dec_learn_t=0.0, lift_t=0.0, pre_ok=False, pre_ang=0.0,
+        hold_ang=0.0,
     )
 
 
@@ -210,6 +238,11 @@ def drift_step(s: dict, p: dict, dt: float, a_fwd: float, a_left: float, r_dps: 
 
     amag = math.sqrt(fa * fa + fl * fl)
     rr = abs(fr)
+    lift = thr_pct <= p["dec_thr_pct"]
+    brake = thr_pct < p["dec_brake_pct"]
+
+    def cs_now(dd):   # kontra bez progu łuku (geo wystarcza)
+        return steer_ok and abs(s["steer"]) >= p["cs_min_pct"] and (s["steer"] > 0) == (dd < 0)
     # geo: kąt i V liczone od niższego progu (nauka skrętu, podgląd); corner: łuk do punktów
     geo = rr >= p["min_yaw_dps"] and amag >= p["min_acc_cs_g"]
     corner = geo and amag >= (p["min_acc_cs_g"] if gate else p["min_acc_g"])
@@ -231,10 +264,29 @@ def drift_step(s: dict, p: dict, dt: float, a_fwd: float, a_left: float, r_dps: 
         sg = 1.0 if fr >= 0 else -1.0
         b0 = -sg * math.atan2(fa, fl * sg)
         at = s["vdot"] / G
+        if not s["dec_set"]:
+            s["dec_c"], s["dec_b"] = p["dec_coast_g"], p["dec_brake_g"]
+            s["dec_set"] = True
+        dec = 0.0
+        if p["dec_on"] and lift:
+            dec = s["dec_b"] if brake else s["dec_c"]
+            at = 0.0
         fa2 = fa - at * math.cos(b0)
         fl2 = fl - at * math.sin(b0)
         angle = math.degrees(math.atan2(fa2, fl2 * sg))
+        raw = angle
+        if dec > 0.0:
+            ac = math.sqrt(max(amag * amag - dec * dec, 0.0))
+            angle += math.degrees(math.atan2(dec, ac))
         d = 1 if fr >= 0 else -1
+        if (p["dec_auto"] and p["dec_on"] and lift and s["lift_t"] <= p["dec_learn_win_s"] + T_EPS
+                and s["pre_ok"] and cs_now(d)):
+            diff = max(0.0, min(80.0, s["pre_ang"] - raw))
+            ds = amag * math.sin(math.radians(diff))
+            k = dt / (p["dec_learn_tau_s"] + dt)
+            key = "dec_b" if brake else "dec_c"
+            s[key] = max(0.0, min(p["dec_max_g"], s[key] + k * (ds - s[key])))
+            s["dec_learn_t"] += dt
     else:
         s["vdot"] = 0.0
         s["corner_t"] = 0.0
@@ -262,6 +314,26 @@ def drift_step(s: dict, p: dict, dt: float, a_fwd: float, a_left: float, r_dps: 
     drifting = (corner and s["v"] >= p["min_v_mps"] and s["cool_t"] <= T_EPS
                 and p["min_angle_deg"] <= angle <= p["spin_angle_deg"]
                 and (not gate or s["cs"] or angle >= p["angle_no_cs_deg"]))
+    # kąt na gazie przed puszczeniem (nauka D) i podtrzymanie driftu kontrą
+    if not lift:
+        if drifting:
+            s["pre_ang"] = s["pre_ang"] + dt / (p["dec_pre_tau_s"] + dt) * (angle - s["pre_ang"]) if s["pre_ok"] else angle
+            s["pre_ok"] = True
+        else:
+            s["pre_ok"] = False
+    elif not (drifting or s["in_drift"]):
+        s["pre_ok"] = False
+    s["lift_t"] = s["lift_t"] + dt if lift else 0.0
+    if (p["hold_on"] and s["in_drift"] and lift and geo and cs_now(d) and s["cool_t"] <= T_EPS
+            and abs(angle) <= p["spin_angle_deg"]):
+        # kąt nie spada szybciej niż zanik podtrzymania (po puszczeniu gazu kąt z IMU spada płynnie)
+        s["hold_ang"] = max(s["hold_ang"] * math.exp(-dt / p["hold_tau_s"]), angle)
+        if s["hold_ang"] >= p["min_angle_deg"]:
+            angle = s["hold_ang"]
+            s["angle"] = angle
+            drifting = True
+    elif drifting:
+        s["hold_ang"] = angle
     s["spin_t"] = s["spin_t"] + dt if (corner and abs(angle) > p["spin_angle_deg"]) else 0.0
     s["full_t"] = s["full_t"] + dt if thr_pct >= p["full_thr_pct"] else 0.0
     s["full_on"] = s["full_t"] >= p["full_thr_s"] - T_EPS
@@ -354,7 +426,9 @@ def drift_score(race, cfg: dict | None = None) -> dict:
     summary = dict(total=end["total"], best_chain=end["best"], chains=end["n_banks"],
                    transitions=s["n_trans"], spins=s["n_lost"], drift_time_s=s["drift_t"],
                    angle_max_deg=s["angle_max"], steer_sign=steer_sign_of(s, p),
-                   full_drift_s=s["full_drift_t"], yaw_trim_deg=s["trim"], yaw_trim_time_s=s["trim_t"])
+                   full_drift_s=s["full_drift_t"], yaw_trim_deg=s["trim"], yaw_trim_time_s=s["trim_t"],
+                   dec_coast_g=s["dec_c"] if s["dec_set"] else p["dec_coast_g"],
+                   dec_brake_g=s["dec_b"] if s["dec_set"] else p["dec_brake_g"], dec_learn_s=s["dec_learn_t"])
     out["t"] = race.t_s
     return dict(series=out, summary=summary)
 

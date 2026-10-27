@@ -6,9 +6,9 @@
 #include <stdint.h>
 
 #define FW_VERSION_MAJOR    1
-#define FW_VERSION_MINOR    7
-#define FW_VERSION_PATCH    1
-#define FW_VERSION_STR      "1.7.1"
+#define FW_VERSION_MINOR    8
+#define FW_VERSION_PATCH    0
+#define FW_VERSION_STR      "1.8.0"
 
 // ---------------------------------------------------------------- hall
 // Tryb czujnika halla: 1 (tylko linia A) albo 3 (A/B/C).
@@ -200,6 +200,21 @@
 #define DRIFT_AY_FOLD_MIN_S         2.0f
 #define DRIFT_ANGLE_NO_CS_DEG       40.0f   // [deg] od tego kąta drift także bez kontry (fw 1.7.1: 90 → 40 – kontra znika
                                             // przy każdej przekładce i w głębokim drifcie z kołami prosto; przyczepność ma kąt ~0)
+// Puszczony gaz / hamulec w drifcie (fw 1.8): poprawka kąta o opóźnienie wzdłuż toru + podtrzymanie kontrą
+#define DRIFT_DEC_ON                1
+#define DRIFT_DEC_THR_PCT           5.0f    // [%] gaz ≤ = puszczony
+#define DRIFT_DEC_BRAKE_PCT         (-5.0f) // [%] gaz < = hamulec
+#define DRIFT_DEC_COAST_G           0.12f   // [g] opóźnienie bokiem bez gazu (profil: DRIFT DEC)
+#define DRIFT_DEC_BRAKE_G           0.16f   // [g] opóźnienie bokiem na hamulcu (profil)
+#define DRIFT_DEC_MAX_G             0.3f    // [g] ograniczenie nauki
+#define DRIFT_DEC_AUTO              0       // nauka opóźnień w jeździe (profil)
+#define DRIFT_DEC_LEARN_WIN_S       0.6f    // [s] okno po puszczeniu gazu
+#define DRIFT_DEC_LEARN_TAU_S       10.0f   // [s] stała czasowa nauki
+#define DRIFT_DEC_PRE_TAU_S         0.3f    // [s] filtr kąta na gazie
+#define DRIFT_DEC_SAVE_MIN_S        2.0f    // [s] nauki, po których Xiao zapisuje nowe wartości (poza nagrywaniem)
+#define DRIFT_DEC_SAVE_DIFF_G       0.005f  // [g] minimalna zmiana do zapisu
+#define DRIFT_HOLD_ON               1
+#define DRIFT_HOLD_TAU_S            1.0f    // [s] zanik podtrzymanego kąta
 #define DRIFT_FULL_BONUS            0       // bonus za pełny gaz – domyślnie wył. (profil: DRIFT BONUS 1)
 #define DRIFT_FULL_THR_PCT          95.0f   // [%] gaz uznany za pełny
 #define DRIFT_FULL_THR_S            1.0f    // [s] tak długo nieprzerwanie = pełny gaz
@@ -219,13 +234,14 @@
 // ---------------------------------------------------------------- format
 #define RUN_FORMAT_VERSION  1
 #define RACE_FORMAT_VERSION 2       // 2: skręt w próbce (22 B) i neutrum skrętu w nagłówku
-#define PROTOCOL_VERSION    8       // 2: komendy wyścigów RLIST/RGET/RDEL/RERASE/RSTOP
+#define PROTOCOL_VERSION    9       // 2: komendy wyścigów RLIST/RGET/RDEL/RERASE/RSTOP
                                     // 3: punkty driftu w LIVE, DRIFT RESET, MOUNT
                                     // 4: skręt (LIVE "st", kontra i znak skrętu w "d", MOUNT … <znak>)
                                     // 5: profil auta – MOUNT … <nazwa>, zapis na stałe (mount_saved)
                                     // 6: bonus za pełny gaz – DRIFT BONUS 0|1, flaga full w "d"
                                     // 7: DRIFT BONUS 0|1 <próg %> <czas s> (pełny gaz konfigurowalny)
                                     // 8: auto-korekta montażu – trim w "d" i yaw_trim w STATUS
+                                    // 9: DRIFT DEC <g> <g> <0|1> (opóźnienie bokiem w drifcie, nauka), RLIST <od> + "next"
 
 // ---------------------------------------------------------------- debug
 // Komendy SIM_* (syntetyczne zbocza/gaz) dostępne tylko przez USB.

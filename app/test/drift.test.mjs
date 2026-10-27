@@ -104,3 +104,33 @@ test('auto-korekta odchyłki montażu: 12° → trim ≈ 12°', () => {
   }
   assert.ok(Math.abs(s.trim - 12) < 1, String(s.trim));
 });
+
+test('puszczony gaz / hamulec: nauka opóźnień bokiem (jak drift.py)', () => {
+  const r = load('drift_lift');
+  const cfg = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+  Object.assign(cfg.drift, { dec_auto: 1, dec_coast_g: 0, dec_brake_g: 0, dec_learn_tau_s: 0.3 });
+  const sm = driftScore(r, cfg).summary;
+  assert.ok(sm.dec_coast_g > 0.04 && sm.dec_coast_g < 0.16, `${sm.dec_coast_g}`);
+  assert.ok(sm.dec_brake_g > 0.08 && sm.dec_brake_g < 0.22, `${sm.dec_brake_g}`);
+  assert.ok(sm.dec_learn_s > 0.5);
+});
+
+test('kontra podtrzymuje drift po puszczeniu gazu (zanik kąta 1 s)', () => {
+  const run = (holdOn) => {
+    const p = { ...driftParams(DEFAULT_SETTINGS), steer_sign: 1, hold_on: holdOn, dec_on: 0 };
+    const s = driftInit();
+    for (let i = 0; i < 40; i++) driftStep(s, p, 0.05, 0, 0, 0, true, 0, 0);
+    const th = 35 * Math.PI / 180;
+    let n = 0;
+    for (let k = 0; k < 80; k++) {
+      const lift = k >= 40;
+      const ang = lift ? 0 : th;
+      driftStep(s, p, 0.05, 0.4 * Math.sin(ang), 0.4 * Math.cos(ang), 120, false, -20, lift ? 0 : 40);
+      if (lift && s.in_drift) n++;
+    }
+    return n;
+  };
+  const n = run(1);
+  assert.ok(n >= 14 && n <= 19, `${n}`);
+  assert.ok(run(0) <= 2);
+});

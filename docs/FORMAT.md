@@ -91,7 +91,9 @@ F8 pobrany), `+12 długość`, `+16 CRC` (= crc32 startu). Dane startu od offset
 ## Rekord profilu auta (64 B, `mount_store.cpp`)
 
 `u32 magic 0x4D463458 ("X4FM") | u16 wersja 1 | i8 idx[3] | i8 znak[3] | f32 yaw_deg | i8 znak skrętu |
-char nazwa[24] (UTF-8, zero na końcu) | 16 B zera | u32 crc32 (poprzednie 60 B)`.
+char nazwa[24] (UTF-8, zero na końcu) | u8 flagi | u8 full_pct | u8 full_ds | u16 dec_coast [mg] | u16 dec_brake [mg] |
+12 B zera | u32 crc32 (poprzednie 60 B)`. Flagi: bit 0 bonus za pełny gaz, 1 pola full_* ważne, 2 nauka opóźnień,
+3 pola dec_* ważne (fw 1.8; starsze rekordy – wartości z `config.h`).
 idx/znak: osie płytki dla forward/left/up (0=x, 1=y, 2=z; ±1). Zapis rekordu = programowanie bez kasowania;
 po 1024 zmianach blok kasowany w tle i zapis od początku. Brak poprawnego rekordu = wartości z `config.h`.
 

@@ -4,7 +4,8 @@
  * Format 1 (próbka 20 B) i 2 (22 B, skręt) – krok próbki z nagłówka.
  * Używane przez tools/tests/test_drift.py.
  *   gcc -O2 -I../../firmware/src drift_host.c ../../firmware/src/drift.c -lm
- *   drift_host plik.bin [forward left up yaw_deg [steer_sign [full_bonus]]]   np. +x +y +z 0 0 1 */
+ *   drift_host plik.bin [forward left up yaw_deg [steer_sign [full_bonus [dec_auto [dec_coast_g dec_brake_g]]]]]
+ *   np. +x +y +z 0 0 1; na końcu (stderr): nauczone opóźnienia "dec <coast> <brake> <czas nauki>" */
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -64,6 +65,11 @@ int main(int argc, char** argv) {
   p.yaw_offset_deg = yaw;
   p.steer_sign = steer_sign;
   p.full_bonus = full_bonus;
+  if (argc >= 9) p.dec_auto = atoi(argv[8]);
+  if (argc >= 11) {
+    p.dec_coast_g = (float)atof(argv[9]);
+    p.dec_brake_g = (float)atof(argv[10]);
+  }
   DriftState s;
   drift_init(&s);
   for (uint32_t i = 0; i < ns; i++) {
@@ -86,5 +92,7 @@ int main(int argc, char** argv) {
     printf("%.4f %.4f %.3f %d %.3f %d %d\n", s.angle, s.corner ? s.v : 0.0f, s.pts, s.mult, s.total,
            s.in_drift, s.cs);
   }
+  fprintf(stderr, "dec %.5f %.5f %.3f\n", s.dec_set ? s.dec_c : p.dec_coast_g, s.dec_set ? s.dec_b : p.dec_brake_g,
+          s.dec_learn_t);
   return 0;
 }

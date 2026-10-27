@@ -56,6 +56,18 @@ void drift_default_params(DriftParams* p) {
   p->full_thr_pct = DRIFT_FULL_THR_PCT;
   p->full_thr_s = DRIFT_FULL_THR_S;
   p->full_bonus_mult = DRIFT_FULL_BONUS_MULT;
+  p->dec_on = DRIFT_DEC_ON;
+  p->dec_thr_pct = DRIFT_DEC_THR_PCT;
+  p->dec_brake_pct = DRIFT_DEC_BRAKE_PCT;
+  p->dec_coast_g = DRIFT_DEC_COAST_G;
+  p->dec_brake_g = DRIFT_DEC_BRAKE_G;
+  p->dec_max_g = DRIFT_DEC_MAX_G;
+  p->dec_auto = DRIFT_DEC_AUTO;
+  p->dec_learn_win_s = DRIFT_DEC_LEARN_WIN_S;
+  p->dec_learn_tau_s = DRIFT_DEC_LEARN_TAU_S;
+  p->dec_pre_tau_s = DRIFT_DEC_PRE_TAU_S;
+  p->hold_on = DRIFT_HOLD_ON;
+  p->hold_tau_s = DRIFT_HOLD_TAU_S;
 }
 
 int drift_steer_sign(const DriftState* s, const DriftParams* p) {
@@ -77,6 +89,11 @@ void drift_reset_score(DriftState* s) {
   s->n_banks = s->n_lost = s->n_trans = 0;
   s->drift_t = s->angle_max = 0.0f;
   s->full_drift_t = 0.0f;
+}
+
+/* kontra bez progu łuku (geo wystarcza) */
+static int cs_now(const DriftState* s, const DriftParams* p, int d) {
+  return s->steer_ok && fabsf(s->steer) >= p->cs_min_pct && ((s->steer > 0.0f) == (d < 0));
 }
 
 static void bank(DriftState* s) {
@@ -161,6 +178,8 @@ void drift_step(DriftState* s, const DriftParams* p, float dt, float a_fwd, floa
 
   float amag = sqrtf(fa * fa + fl * fl);
   float rr = fabsf(fr);
+  int lift = thr_pct <= p->dec_thr_pct;
+  int brake = thr_pct < p->dec_brake_pct;
   int geo = rr >= p->min_yaw_dps && amag >= p->min_acc_cs_g;   /* kąt i V; nauka skrętu */
   int corner = geo && amag >= (gate ? p->min_acc_cs_g : p->min_acc_g);   /* łuk do punktów */
   float angle = 0.0f;
@@ -182,10 +201,39 @@ void drift_step(DriftState* s, const DriftParams* p, float dt, float a_fwd, floa
     float sg = fr >= 0.0f ? 1.0f : -1.0f;
     float b0 = -sg * atan2f(fa, fl * sg);
     float at = s->vdot / G_MPS2;
+    if (!s->dec_set) {
+      s->dec_c = p->dec_coast_g;
+      s->dec_b = p->dec_brake_g;
+      s->dec_set = 1;
+    }
+    float dec = 0.0f;
+    if (p->dec_on && lift) {
+      dec = brake ? s->dec_b : s->dec_c;
+      at = 0.0f;
+    }
     float fa2 = fa - at * cosf(b0);
     float fl2 = fl - at * sinf(b0);
     angle = atan2f(fa2, fl2 * sg) * RAD2DEG;
+    float raw = angle;
+    if (dec > 0.0f) {
+      float q = amag * amag - dec * dec;
+      angle += atan2f(dec, sqrtf(q > 0.0f ? q : 0.0f)) * RAD2DEG;
+    }
     d = fr >= 0.0f ? 1 : -1;
+    if (p->dec_auto && p->dec_on && lift && s->lift_t <= p->dec_learn_win_s + T_EPS && s->pre_ok &&
+        cs_now(s, p, d)) {
+      float diff = s->pre_ang - raw;
+      if (diff < 0.0f) diff = 0.0f;
+      if (diff > 80.0f) diff = 80.0f;
+      float ds = amag * sinf(diff * DEG2RAD);
+      float k = dt / (p->dec_learn_tau_s + dt);
+      float* key = brake ? &s->dec_b : &s->dec_c;
+      float v = *key + k * (ds - *key);
+      if (v < 0.0f) v = 0.0f;
+      if (v > p->dec_max_g) v = p->dec_max_g;
+      *key = v;
+      s->dec_learn_t += dt;
+    }
   } else {
     s->vdot = 0.0f;
     s->corner_t = 0.0f;
@@ -209,6 +257,31 @@ void drift_step(DriftState* s, const DriftParams* p, float dt, float a_fwd, floa
   int drifting = corner && s->v >= p->min_v_mps && s->cool_t <= T_EPS && angle >= p->min_angle_deg &&
                  angle <= p->spin_angle_deg &&
                  (!gate || s->cs || angle >= p->angle_no_cs_deg);
+  /* kąt na gazie przed puszczeniem (nauka opóźnienia) i podtrzymanie driftu kontrą */
+  if (!lift) {
+    if (drifting) {
+      s->pre_ang = s->pre_ok ? s->pre_ang + dt / (p->dec_pre_tau_s + dt) * (angle - s->pre_ang) : angle;
+      s->pre_ok = 1;
+    } else {
+      s->pre_ok = 0;
+    }
+  } else if (!(drifting || s->in_drift)) {
+    s->pre_ok = 0;
+  }
+  s->lift_t = lift ? s->lift_t + dt : 0.0f;
+  if (p->hold_on && s->in_drift && lift && geo && cs_now(s, p, d) && s->cool_t <= T_EPS &&
+      fabsf(angle) <= p->spin_angle_deg) {
+    /* kąt nie spada szybciej niż zanik podtrzymania (po puszczeniu gazu kąt z IMU spada płynnie) */
+    float h = s->hold_ang * expf(-dt / p->hold_tau_s);
+    s->hold_ang = angle > h ? angle : h;
+    if (s->hold_ang >= p->min_angle_deg) {
+      angle = s->hold_ang;
+      s->angle = angle;
+      drifting = 1;
+    }
+  } else if (drifting) {
+    s->hold_ang = angle;
+  }
   s->spin_t = (corner && fabsf(angle) > p->spin_angle_deg) ? s->spin_t + dt : 0.0f;
   s->full_t = thr_pct >= p->full_thr_pct ? s->full_t + dt : 0.0f;
   s->full_on = s->full_t >= p->full_thr_s - T_EPS;

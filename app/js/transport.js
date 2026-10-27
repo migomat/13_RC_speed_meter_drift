@@ -281,7 +281,8 @@ export class DemoTransport {
     const [cmd, ...args] = text.trim().split(/\s+/);
     switch (cmd) {
       case 'INFO':
-        return this._text(JSON.stringify({ fw: '1.6.0-demo', format: 1, proto: 7, full_pct: this.fullPct || 95, full_s: this.fullS ?? 1, steer: 1, mount_saved: !!this.mount[5],
+        return this._text(JSON.stringify({ fw: '1.6.0-demo', format: 1, proto: 9, full_pct: this.fullPct || 95, full_s: this.fullS ?? 1,
+          dec_coast: this.decC ?? 0.12, dec_brake: this.decB ?? 0.16, dec_auto: this.decAuto ? 1 : 0, steer: 1, mount_saved: !!this.mount[5],
           drift_bonus: this.driftBonus ? 1 : 0, hall_lines: 1, pole_pairs: 1,
           edges_per_rev: 2, slot_size: 131072, slots: 8, sample_rate: 500, get_block_max: 4096, name: this.name,
           race_rate: 20, race_area: 1048576, race_sample_size: 20, drift: 1, gyro_range: 1000, mount: this.mount }));
@@ -344,6 +345,12 @@ export class DemoTransport {
         this.vmax = 0;
         return this._text('OK');
       case 'DRIFT':
+        if (args[0] === 'DEC') {
+          this.decC = +args[1]; this.decB = +args[2]; this.decAuto = args[3] === '1';
+          this.drift.dec_set = false;
+          return this._text(JSON.stringify({ mount: this.mount, mount_saved: true, drift_bonus: this.driftBonus ? 1 : 0,
+            full_pct: this.fullPct || 95, full_s: this.fullS ?? 1, dec_coast: this.decC, dec_brake: this.decB, dec_auto: this.decAuto ? 1 : 0 }));
+        }
         if (args[0] === 'BONUS') {
           this.driftBonus = args[1] === '1';
           if (args[2]) this.fullPct = +args[2];
@@ -406,6 +413,7 @@ export class DemoTransport {
     p.full_bonus = this.driftBonus ? 1 : 0;
     if (this.fullPct) p.full_thr_pct = this.fullPct;
     if (this.fullS !== undefined) p.full_thr_s = this.fullS;
+    if (this.decC !== undefined) { p.dec_coast_g = this.decC; p.dec_brake_g = this.decB; p.dec_auto = this.decAuto ? 1 : 0; }
     driftStep(this.drift, p, dt[i], af[i], al[i], gu[i], rest[i], steer[i], thr[i]);
     const s = this.drift;
     const sgn = steerSignOf(s, p);

@@ -65,6 +65,18 @@ drift:
   cs_min_pct: 8             # [%] skręt od neutrum uznany za kontrę
   cs_required: 1            # 1 = przy znanym skręcie drift wymaga kontry
   angle_no_cs_deg: 40       # [deg] od tego kąta drift także bez kontry (przyczepność ma kąt ~0)
+  dec_on: 1                 # poprawka kąta o opóźnienie bokiem na puszczonym gazie / hamulcu (fw 1.8)
+  dec_thr_pct: 5            # [%] gaz ≤ = puszczony
+  dec_brake_pct: -5         # [%] gaz < = hamulec
+  dec_coast_g: 0.12         # [g] opóźnienie bokiem bez gazu (profil auta)
+  dec_brake_g: 0.16         # [g] opóźnienie bokiem na hamulcu (profil auta)
+  dec_max_g: 0.3            # [g]
+  dec_auto: 0               # nauka opóźnień w jeździe (profil auta)
+  dec_learn_win_s: 0.6      # [s]
+  dec_learn_tau_s: 10       # [s]
+  dec_pre_tau_s: 0.3        # [s]
+  hold_on: 1                # kontra podtrzymuje drift bez gazu
+  hold_tau_s: 1.0           # [s] zanik podtrzymanego kąta
   auto_yaw: 1               # korekta odchyłki montażu w jeździe (na wprost z gazem / hamowaniem)
   ay_min_g: 0.06            # [g]
   ay_max_dps: 8             # [dps]

@@ -41,6 +41,12 @@ typedef struct {
   float ay_min_g, ay_max_dps, ay_steer_pct, ay_hold_s, ay_tau_s, ay_max_err_deg, ay_max_trim_deg;
   int   full_bonus;         /* 1 = bonus za pełny gaz w drifcie */
   float full_thr_pct, full_thr_s, full_bonus_mult;
+  int   dec_on;             /* poprawka kąta o opóźnienie na puszczonym gazie / hamulcu */
+  float dec_thr_pct, dec_brake_pct, dec_coast_g, dec_brake_g, dec_max_g;
+  int   dec_auto;           /* nauka opóźnień w jeździe */
+  float dec_learn_win_s, dec_learn_tau_s, dec_pre_tau_s;
+  int   hold_on;            /* kontra podtrzymuje drift bez gazu */
+  float hold_tau_s;
 } DriftParams;
 
 typedef struct {
@@ -72,6 +78,13 @@ typedef struct {
   float total, best, last;
   uint32_t n_banks, n_lost, n_trans;
   float drift_t, angle_max;
+  int   dec_set;          /* dec_c / dec_b wzięte z parametrów (0 = przy następnym kroku) */
+  float dec_c, dec_b;     /* [g] opóźnienie bokiem: puszczony gaz / hamulec (nauczone albo z profilu) */
+  float dec_learn_t;      /* [s] czas próbek nauki od ostatniego zapisu */
+  float lift_t;           /* [s] od puszczenia gazu */
+  int   pre_ok;
+  float pre_ang;          /* [deg] kąt driftu na gazie przed puszczeniem */
+  float hold_ang;         /* [deg] podtrzymany kąt */
 } DriftState;
 
 void drift_default_params(DriftParams* p);

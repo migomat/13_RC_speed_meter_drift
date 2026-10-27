@@ -371,12 +371,36 @@ _EIGHTS = [
     (1.0, 0.0, -200.0, 0.0, 0.0, None),
     (2.0, 0.0, -200.0, 0.0, 0.0, None),    # postój
 ]
+# Drift z puszczonym gazem i hamowaniem (fw 1.8): auto zwalnia w drifcie (V maleje przy stałym kącie),
+# przyspieszenie przestaje być prostopadłe do prędkości – bez poprawki kąt spada i drift się urywa.
+_LIFT = [
+    (3.0, 0.0, 0.0, 0.0, 0.0, None),       # postój
+    (1.5, 4.0, 0.0, 0.0, 0.0, None),       # rozpędzanie
+    (0.5, 4.0, 0.0, 60.0, 20.0, None),     # łuk z przyczepnością (nauka znaku skrętu)
+    (3.0, 4.0, 0.0, 60.0, 20.0, None),
+    (0.5, 4.0, 0.0, 0.0, 0.0, None),
+    (1.0, 4.0, 0.0, 0.0, 0.0, None),
+    (0.5, 4.0, -35.0, 115.0, -21.0, None), # lewy drift na gazie
+    (2.0, 4.0, -35.0, 115.0, -21.0, 35.0),
+    (1.5, 2.5, -35.0, 115.0, -21.0, 35.0), # puszczony gaz: −1 m/s² (~0,1 g) – t 12,0–13,5 s
+    (0.7, 4.0, 35.0, -115.0, 21.0, None),  # przekładka na gazie → prawy
+    (2.0, 4.0, 35.0, -115.0, 21.0, 35.0),
+    (1.0, 2.6, 35.0, -115.0, 21.0, 35.0),  # hamulec: −1,4 m/s² (~0,14 g) – t 16,2–17,2 s
+    (0.5, 2.6, 0.0, 0.0, 0.0, None),       # wyjście
+    (2.5, 2.6, 0.0, 0.0, 0.0, None),       # prosta – łańcuch zaliczony
+    (1.0, 0.0, 0.0, 0.0, 0.0, None),
+    (2.0, 0.0, 0.0, 0.0, 0.0, None),       # postój
+]
+
 DRIFT_SCENARIOS = {
     "drift_eights": dict(seq=31, segments=_EIGHTS, steer_polarity=1,
                          full_throttle=[(14.9, 17.2), (23.4, 25.4)],   # pełny gaz: prawy drift, drugi łańcuch
                          truth=dict(transitions=2, chains=1, spins=1, steer_sign=1, full_drift_s=2.3)),
     "drift_eights_rev": dict(seq=32, segments=_EIGHTS, steer_polarity=-1,
                              truth=dict(transitions=2, chains=1, spins=1, steer_sign=-1)),
+    "drift_lift": dict(seq=33, segments=_LIFT, steer_polarity=1,
+                       throttle=[(12.0, 13.5, 0.0), (16.2, 17.2, -40.0)],   # [s] okna gazu [%]: puszczony, hamulec
+                       truth=dict(transitions=1, chains=1, spins=0, steer_sign=1, coast_g=0.10, brake_g=0.14)),
 }
 DRIFT_GYRO_SCALE = 35.0e-3   # ±1000 dps
 STEER_NEUTRAL_US = 1480
@@ -429,6 +453,9 @@ def make_drift_vector(scn: dict, seed: int):
         tj = (j + 1) / fs
         full = any(a <= tj < b for a, b in scn.get("full_throttle", []))
         thr = 1352 if vw < 0.05 else (1352 + 500 if full else 1352 + 220)
+        for a, b, pct in scn.get("throttle", []):
+            if a <= tj < b:
+                thr = 1352 + int(round(pct * 5.0))
         steer = STEER_NEUTRAL_US + int(round(scn["steer_polarity"] * float(np.mean(S[sl])) * 5.0
                                              + rng.normal(0, 1.0)))
         nz = rng.normal(0, 0.008, 3)

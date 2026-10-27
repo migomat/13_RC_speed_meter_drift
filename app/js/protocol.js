@@ -165,8 +165,24 @@ export class Device {
   }
   arm() { return this.command('ARM'); }
 
-  /** Wyścigi (protokół ≥ 2): {races, state, used, size}. */
-  rlist() { return this.command('RLIST'); }
+  /** Wyścigi (protokół ≥ 2): {races, state, used, size}. Protokół ≥ 9: lista w częściach ("next") –
+   *  starszy firmware ucinał ją bez znaku (pełna pamięć = ostatnie wyścigi niewidoczne). */
+  async rlist() {
+    const r = await this.command('RLIST');
+    let next = r.next;
+    while (next !== undefined && next !== null) {
+      const q = await this.command(`RLIST ${next}`);
+      if (!q.races || !q.races.length) break;
+      r.races = r.races.concat(q.races);
+      next = q.next;
+    }
+    delete r.next;
+    return r;
+  }
+  // protokół ≥ 9: opóźnienie bokiem w drifcie [g] (puszczony gaz, hamulec) i nauka w jeździe – profil Xiao
+  driftDec(coastG, brakeG, auto) {
+    return this.command(`DRIFT DEC ${(+coastG || 0).toFixed(3)} ${(+brakeG || 0).toFixed(3)} ${auto ? 1 : 0}`);
+  }
 
   getBlock(seq, offset, len, timeoutMs = 6000, cmd = 'GET') {
     return this._serial(async () => {

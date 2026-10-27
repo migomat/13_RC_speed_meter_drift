@@ -72,7 +72,19 @@
    "full_bonus": 0,
    "full_thr_pct": 95.0,
    "full_thr_s": 1.0,
-   "full_bonus_mult": 1.5
+   "full_bonus_mult": 1.5,
+   "dec_on": 1,
+   "dec_thr_pct": 5.0,
+   "dec_brake_pct": -5.0,
+   "dec_coast_g": 0.12,
+   "dec_brake_g": 0.16,
+   "dec_max_g": 0.3,
+   "dec_auto": 0,
+   "dec_learn_win_s": 0.6,
+   "dec_learn_tau_s": 10.0,
+   "dec_pre_tau_s": 0.3,
+   "hold_on": 1,
+   "hold_tau_s": 1.0
   }
  },
  "metrics": {

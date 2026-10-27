@@ -226,3 +226,82 @@ def test_auto_yaw_trim_converges():
     for k in range(200):                                  # kręcenie w kółko nie rusza korekty
         drift_step(s, p, 0.05, 0.1, 0.4, 120.0, False, -20.0, 50.0)
     assert abs(s["trim"] - 12.0) < 1.0
+
+
+# ------------------------------------------------------------ puszczony gaz / hamulec (fw 1.8)
+LIFT_W = [(12.2, 13.5), (16.4, 17.2)]   # [s od początku nagrania] puszczony gaz, hamulec (drift_lift)
+
+
+def _windows(sr):
+    t = np.cumsum(np.full(len(sr["angle"]), 0.05))
+    return [(t >= a) & (t < b) for a, b in LIFT_W]
+
+
+def test_lift_brake_angle_corrected():
+    """Drift zwalniający bez gazu / na hamulcu: z poprawką kąt bliski prawdziwego (35°), bez – zaniżony."""
+    race = parse_race((VEC / "drift_lift.bin").read_bytes())
+    on = drift_score(race, DEFAULT_CONFIG)["series"]
+    cfg = json.loads(json.dumps(DEFAULT_CONFIG))
+    cfg["drift"].update(dec_on=0, hold_on=0)
+    off = drift_score(race, cfg)["series"]
+    for m_on, m_off in zip(_windows(on), _windows(off)):
+        assert np.all(on["drift"][m_on] == 1.0)
+        assert abs(np.mean(on["angle"][m_on]) - 35.0) < 5.0
+        assert abs(np.mean(on["angle"][m_on]) - 35.0) + 2.5 < abs(np.mean(off["angle"][m_off]) - 35.0)
+
+
+def test_dec_learning_converges():
+    """Nauka z ciągłości kąta przy puszczeniu gazu: od 0 w stronę prawdziwych opóźnień (0,10 / 0,14 g)."""
+    race = parse_race((VEC / "drift_lift.bin").read_bytes())
+    cfg = json.loads(json.dumps(DEFAULT_CONFIG))
+    cfg["drift"].update(dec_auto=1, dec_coast_g=0.0, dec_brake_g=0.0, dec_learn_tau_s=0.3)
+    sm = drift_score(race, cfg)["summary"]
+    assert 0.04 < sm["dec_coast_g"] < 0.16, sm["dec_coast_g"]
+    assert 0.08 < sm["dec_brake_g"] < 0.22, sm["dec_brake_g"]
+    assert sm["dec_learn_s"] > 0.5
+    cfg["drift"]["dec_auto"] = 0                          # bez nauki – wartości z profilu
+    sm = drift_score(race, cfg)["summary"]
+    assert sm["dec_coast_g"] == 0.0 and sm["dec_learn_s"] == 0.0
+
+
+def test_c_dec_learning_matches_python(drift_bin):
+    race = parse_race((VEC / "drift_lift.bin").read_bytes())
+    cfg = json.loads(json.dumps(DEFAULT_CONFIG))
+    cfg["drift"].update(dec_auto=1, dec_coast_g=0.0, dec_brake_g=0.0)
+    sm = drift_score(race, cfg)["summary"]
+    r = subprocess.run([str(drift_bin), str(VEC / "drift_lift.bin"), "+x", "+y", "+z", "0", "0", "0", "1", "0", "0"],
+                       capture_output=True, text=True, check=True)
+    _, c, b, lt = r.stderr.split()
+    assert abs(float(c) - sm["dec_coast_g"]) < 2e-3 and abs(float(b) - sm["dec_brake_g"]) < 2e-3
+    assert abs(float(lt) - sm["dec_learn_s"]) < 0.11
+
+
+def _hold_run(hold_on):
+    """Drift w lewo z kontrą na gazie, potem bez gazu kąt z IMU spada do 0 (kontra trwa) – podtrzymanie."""
+    from rc_launch.drift import drift_init, drift_params, drift_step
+    p = drift_params(DEFAULT_CONFIG)
+    p.update(steer_sign=1, hold_on=hold_on, dec_on=0)
+    s = drift_init()
+    for _ in range(40):
+        drift_step(s, p, 0.05, 0.0, 0.0, 0.0, True, 0.0, 0.0)
+    th = math.radians(35.0)
+    held = []
+    for k in range(80):
+        lift = k >= 40
+        a = 0.4
+        ang = 0.0 if lift else th                         # bez gazu: kąt z przyspieszenia ~0
+        drift_step(s, p, 0.05, a * math.sin(ang), a * math.cos(ang), 120.0, False, -20.0, 0.0 if lift else 40.0)
+        if lift:
+            held.append((s["in_drift"], s["angle"]))
+    return s, held
+
+
+def test_hold_keeps_drift_with_countersteer():
+    s, held = _hold_run(1)
+    n_on = sum(1 for d, _ in held if d)
+    # zanik kąta 35° → 15° przy hold_tau_s = 1 s: ~0,85 s = 17 próbek
+    assert 14 <= n_on <= 19, n_on
+    assert all(a <= 35.0 + 1e-6 for d, a in held if d)
+    s0, held0 = _hold_run(0)
+    assert sum(1 for d, _ in held0 if d) <= 2         # bez podtrzymania: tylko przejście filtra
+    assert s["pts"] > s0["pts"] or s["total"] > s0["total"]

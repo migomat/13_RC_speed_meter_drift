@@ -64,7 +64,8 @@ static bool      s_imu_ok, s_flash_ok, s_ble_ok, s_hall_ok, s_thr_ok;
 // o yaw. Domyślnie z config.h, zmiana w działaniu komendą MOUNT (wynik kalibracji z aplikacji).
 Mount g_mount = {{IMU_AXIS_FORWARD, IMU_AXIS_LEFT, IMU_AXIS_UP},
                  {IMU_SIGN_FORWARD, IMU_SIGN_LEFT, IMU_SIGN_UP}, IMU_YAW_OFFSET_DEG,
-                 DRIFT_STEER_SIGN, DRIFT_FULL_BONUS, DRIFT_FULL_THR_PCT, DRIFT_FULL_THR_S};
+                 DRIFT_STEER_SIGN, DRIFT_FULL_BONUS, DRIFT_FULL_THR_PCT, DRIFT_FULL_THR_S,
+                 DRIFT_DEC_COAST_G, DRIFT_DEC_BRAKE_G, DRIFT_DEC_AUTO};
 
 static inline float car_axis(const float v[3], int k) { return v[g_mount.idx[k]] * g_mount.sign[k]; }
 
@@ -94,10 +95,15 @@ static void on_race_sample(const RaceSample& r) {
   s_dp.full_bonus = g_mount.full_bonus;
   s_dp.full_thr_pct = g_mount.full_thr_pct;
   s_dp.full_thr_s = g_mount.full_thr_s;
+  s_dp.dec_coast_g = g_mount.dec_coast_g;
+  s_dp.dec_brake_g = g_mount.dec_brake_g;
+  s_dp.dec_auto = g_mount.dec_auto;
   drift_step(&s_ds, &s_dp, (float)r.n_ticks / SAMPLE_RATE_HZ, car_axis(a, 0), car_axis(a, 1),
              car_axis(g, 2), rest, sv, sp, pct);
   g_live.d_full = s_ds.full_on;
   g_live.d_trim = s_ds.trim;
+  g_live.d_dec_c = s_ds.dec_set ? s_ds.dec_c : g_mount.dec_coast_g;
+  g_live.d_dec_b = s_ds.dec_set ? s_ds.dec_b : g_mount.dec_brake_g;
   g_live.steer_pct = sv ? sp * (s_ds.steer_ok ? (float)drift_steer_sign(&s_ds, &s_dp) : 1.0f) : 0.0f;
   g_live.steer_valid = sv;
   g_live.d_cs = s_ds.cs;
@@ -287,6 +293,23 @@ void loop() {
     s_ds.trim_t = 0.0f;
     s_fold_ms = millis();
     mount_store_request_save();
+  }
+  // Nauczone opóźnienia bokiem → zapisane w profilu, gdy nic się nie nagrywa
+  static uint32_t s_dec_ms;
+  if (g_mount.dec_auto && s_ds.dec_set && s_ds.dec_learn_t >= DRIFT_DEC_SAVE_MIN_S && !race_recording() &&
+      !logger_busy() && millis() - s_dec_ms > 10000) {
+    float dc = roundf(s_ds.dec_c * 1000.0f) / 1000.0f, db = roundf(s_ds.dec_b * 1000.0f) / 1000.0f;
+    s_ds.dec_learn_t = 0.0f;
+    s_dec_ms = millis();
+    if (fabsf(dc - g_mount.dec_coast_g) >= DRIFT_DEC_SAVE_DIFF_G || fabsf(db - g_mount.dec_brake_g) >= DRIFT_DEC_SAVE_DIFF_G) {
+      g_mount.dec_coast_g = dc;   // stan nauki zostaje (dec_set) – wartości te same
+      g_mount.dec_brake_g = db;
+      mount_store_request_save();
+    }
+  }
+  if (dec_changed()) {   // profil z aplikacji: nauka od wartości z profilu
+    s_ds.dec_set = 0;
+    s_ds.dec_learn_t = 0.0f;
   }
   mount_store_poll(logger_busy() || race_recording());
   if (mount_changed()) {

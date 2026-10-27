@@ -173,6 +173,16 @@ Wibracja i napis przy przekładce, zaliczeniu łańcucha (+punkty) i obrocie.
   Aplikacja 2.3.2: przy połączeniu zawsze przejmuje montaż z Xiao (także przy innej nazwie profilu i gdy zapis na
   Xiao jest w toku – to tam nadpisała Xiao trzeci raz, jazda 27.10); osie i kąt wysyła tylko po kalibracji,
   ręcznej zmianie osi / kąta albo wyborze innego auta, i pyta o potwierdzenie, gdy osie na Xiao są inne.
+* **Puszczony gaz i hamulec w drifcie (fw 1.8, aplikacja 2.4):** kąt liczony z kierunku przyspieszenia zakłada,
+  że jest ono prostopadłe do prędkości. Bez gazu i na hamulcu auto zwalnia wzdłuż toru i kąt wychodził za mały (jazdy
+  27.10: średnio −34° / −42°) – drift liczył się w 46 % obrotu auta bez gazu i 14 % na hamulcu (na gazie 81 %).
+  Dwie poprawki: (1) odjęcie opóźnienia bokiem z profilu auta – *Hamowanie bokiem* bez gazu 0,12 g i na hamulcu
+  0,16 g (na prostej auto zwalnia tylko ~0,03 / 0,1 g – bokiem opony trą w poprzek); (2) kontra podtrzymuje drift –
+  po puszczeniu gazu kąt nie spada szybciej niż zanik 1 s, dopóki jest kontra i auto się obraca. Wynik na 11 jazdach
+  27.10: bez gazu 61 %, hamulec 49 %, suma 126 → 148 tys. pkt, fałszywy drift w jeździe z przyczepnością bez zmian.
+  **Nauka** (przełącznik w profilu): prawdziwy kąt nie skacze przy puszczeniu gazu – skok kąta z IMU w pierwszych
+  0,6 s bez gazu (z kontrą) daje opóźnienie; Xiao dostraja obie wartości i zapisuje je w profilu (aplikacja przejmuje
+  je przy połączeniu). Na jazdach 26–27.10 nauka zbiega niezależnie od startu do ~0,065 / 0,147 g.
 * **Auto-korekta odchyłki montażu (fw 1.7):** na wprost
   z gazem / hamowaniem (|ω| < 8 °/s, koła prosto, |a| ≥ 0,06 g przez 0,3 s) przyspieszenie leży na osi auta – różnica
   kierunku koryguje odchyłkę (stała czasowa 3 s takiej jazdy) – do wyłączenia zasilania. fw 1.7.0 dopisywał ją do

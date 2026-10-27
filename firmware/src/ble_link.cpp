@@ -29,7 +29,7 @@ static volatile uint16_t s_conn = BLE_CONN_HANDLE_INVALID;
 #define RX_RING 512
 static volatile uint8_t  s_rx[RX_RING];
 static volatile uint16_t s_rx_head, s_rx_tail;
-static bool s_vmax_reset, s_drift_reset, s_mount_changed;
+static bool s_vmax_reset, s_drift_reset, s_mount_changed, s_dec_changed;
 static bool s_phy_fast;   // żądane PHY 2M (pobieranie)
 static volatile uint16_t s_mtu = 23;
 static uint32_t s_conn_ms;          // chwila połączenia (ponowienie prośby o parametry)
@@ -132,6 +132,12 @@ bool mount_changed(void) {
   return r;
 }
 
+bool dec_changed(void) {
+  bool r = s_dec_changed;
+  s_dec_changed = false;
+  return r;
+}
+
 bool drift_reset_requested(void) {
   bool r = s_drift_reset;
   s_drift_reset = false;
@@ -160,8 +166,10 @@ static void mount_str(char* b, size_t n) {
            g_mount.sign[2] > 0 ? '+' : '-', AXIS_CH[g_mount.idx[2]], g_mount.yaw_deg,
            g_mount.steer_sign, g_mount_name, mount_store_saved() ? "true" : "false");
   size_t k = strlen(b);
-  snprintf(b + k, n - k, ",\"mount_save_us\":%lu,\"drift_bonus\":%d,\"full_pct\":%.0f,\"full_s\":%.1f",
-           (unsigned long)mount_store_save_us(), g_mount.full_bonus, g_mount.full_thr_pct, g_mount.full_thr_s);
+  snprintf(b + k, n - k, ",\"mount_save_us\":%lu,\"drift_bonus\":%d,\"full_pct\":%.0f,\"full_s\":%.1f,"
+           "\"dec_coast\":%.3f,\"dec_brake\":%.3f,\"dec_auto\":%d",
+           (unsigned long)mount_store_save_us(), g_mount.full_bonus, g_mount.full_thr_pct, g_mount.full_thr_s,
+           g_mount.dec_coast_g, g_mount.dec_brake_g, g_mount.dec_auto);
 }
 
 // MOUNT <forward> <left> <up> <yaw_deg> [<znak skrętu 1/-1/0> [<nazwa profilu>]],
@@ -184,6 +192,9 @@ static bool parse_mount(char** argv, int argc, Mount* m) {
   m->full_bonus = g_mount.full_bonus;   // osobna komenda DRIFT BONUS
   m->full_thr_pct = g_mount.full_thr_pct;
   m->full_thr_s = g_mount.full_thr_s;
+  m->dec_coast_g = g_mount.dec_coast_g;   // osobna komenda DRIFT DEC
+  m->dec_brake_g = g_mount.dec_brake_g;
+  m->dec_auto = g_mount.dec_auto;
   if (argc > 5) {   // nazwa: bez cudzysłowu i ukośnika (trafia do JSON), UTF-8 dozwolone
     size_t n = strlen(argv[5]);
     if (n >= MOUNT_NAME_LEN) return false;
@@ -324,7 +335,7 @@ static void cmd_status(Link& l) {
            "\"race_size\":%lu,\"race_rec_s\":%lu,\"race_overflows\":%lu,\"race_scan_ms\":%lu,"
            "\"steer_us\":%u,\"steer_neutral_us\":%u,\"steer_learned\":%s,\"steer_pulses\":%lu,"
            "\"steer_rejects\":%lu,\"steer_sign\":%d,\"ble_sup_ms\":%u,\"ble_interval_ms\":%.2f,"
-           "\"yaw_trim\":%.1f}",
+           "\"yaw_trim\":%.1f,\"dec_coast_now\":%.3f,\"dec_brake_now\":%.3f}",
            logger_state_name(), throttle_neutral_us(), throttle_neutral_learned() ? "true" : "false",
            throttle_signal_ok(now) ? "true" : "false", throttle_tick_width(now),
            flash_count_runs() + (logger_ram_run_available() ? 1 : 0), flash_count_free(),
@@ -348,7 +359,7 @@ static void cmd_status(Link& l) {
            (unsigned long)race_scan_ms(), steering_tick_width(now), steering_neutral_us(),
            steering_neutral_learned() ? "true" : "false", (unsigned long)steering_pulse_count(),
            (unsigned long)steering_reject_count(), g_live.d_steer_sign, ble_sup_ms(), ble_interval_ms(),
-           g_live.d_trim);
+           g_live.d_trim, g_live.d_dec_c, g_live.d_dec_b);
   send_text(l, s_out);
 }
 
@@ -431,20 +442,25 @@ static void cmd_del(Link& l, uint32_t seq) {
   send_text(l, s_out);
 }
 
-static void cmd_rlist(Link& l) {
+// RLIST [<od indeksu>] – lista wyścigów; gdy nie mieści się w odpowiedzi, "next" = indeks dalszej
+// części (v9; wcześniej lista była ucinana bez znaku i ostatnie wyścigi były niewidoczne)
+static void cmd_rlist(Link& l, int from) {
   size_t p = snprintf(s_out, sizeof(s_out), "{\"races\":[");
-  for (int i = 0; i < race_count() && p < sizeof(s_out) - 160; i++) {
+  int i = from < 0 ? 0 : from;
+  for (; i < race_count() && p < sizeof(s_out) - 260; i++) {
     const RaceRec* r = race_rec(i);
     p += snprintf(s_out + p, sizeof(s_out) - p,
                   "%s{\"seq\":%lu,\"len\":%lu,\"crc\":%lu,\"unix\":%lu,\"boot\":%lu,"
                   "\"uptime_ms\":%lu,\"n\":%lu,\"end\":%u,\"read\":%s}",
-                  i ? "," : "", (unsigned long)r->seq, (unsigned long)r->len, (unsigned long)r->crc,
+                  i > from ? "," : "", (unsigned long)r->seq, (unsigned long)r->len, (unsigned long)r->crc,
                   (unsigned long)r->unix_s, (unsigned long)r->boot_count,
                   (unsigned long)r->uptime_ms, (unsigned long)r->n_samples, r->end_reason,
                   r->state == SLOT_DOWNLOADED ? "true" : "false");
   }
-  snprintf(s_out + p, sizeof(s_out) - p, "],\"state\":\"%s\",\"used\":%lu,\"size\":%lu}",
-           race_state_name(), (unsigned long)race_used_bytes(), (unsigned long)race_size_bytes());
+  p += snprintf(s_out + p, sizeof(s_out) - p, "],\"state\":\"%s\",\"used\":%lu,\"size\":%lu,\"count\":%d",
+                race_state_name(), (unsigned long)race_used_bytes(), (unsigned long)race_size_bytes(), race_count());
+  if (i < race_count()) p += snprintf(s_out + p, sizeof(s_out) - p, ",\"next\":%d", i);
+  snprintf(s_out + p, sizeof(s_out) - p, "}");
   send_text(l, s_out);
 }
 
@@ -508,7 +524,7 @@ static void handle_line(Link& l, char* line) {
   }
   if (!strcmp(c, "GET") && argc >= 4) return cmd_get(l, U(1), U(2), U(3));
   if (!strcmp(c, "DEL") && argc >= 2) return cmd_del(l, U(1));
-  if (!strcmp(c, "RLIST")) return cmd_rlist(l);
+  if (!strcmp(c, "RLIST")) return cmd_rlist(l, argc > 1 ? (int)U(1) : 0);
   if (!strcmp(c, "RGET") && argc >= 4) return cmd_get(l, U(1), U(2), U(3), true);
   if (!strcmp(c, "RDEL") && argc >= 2) return cmd_rdel(l, U(1));
   if (!strcmp(c, "RERASE")) return cmd_rerase(l, argc > 1 && !strcmp(argv[1], "FORCE"));
@@ -528,6 +544,25 @@ static void handle_line(Link& l, char* line) {
   if (!strcmp(c, "DRIFT") && argc >= 2 && !strcmp(argv[1], "RESET")) {
     s_drift_reset = true;
     return send_text(l, "OK");
+  }
+  // DRIFT DEC <puszczony gaz g> <hamulec g> <nauka 0|1> – opóźnienie bokiem w drifcie (v9)
+  if (!strcmp(c, "DRIFT") && argc >= 5 && !strcmp(argv[1], "DEC")) {
+    float dc = (float)atof(argv[2]), db = (float)atof(argv[3]);
+    int au = atoi(argv[4]) ? 1 : 0;
+    if (!(dc >= 0.0f && dc <= DRIFT_DEC_MAX_G) || !(db >= 0.0f && db <= DRIFT_DEC_MAX_G)) return send_err(l, "BAD_DEC");
+    dc = roundf(dc * 1000.0f) / 1000.0f;
+    db = roundf(db * 1000.0f) / 1000.0f;
+    if (dc != g_mount.dec_coast_g || db != g_mount.dec_brake_g || au != g_mount.dec_auto) {
+      g_mount.dec_coast_g = dc;
+      g_mount.dec_brake_g = db;
+      g_mount.dec_auto = au;
+      s_dec_changed = true;
+      mount_store_request_save();
+    }
+    s_out[0] = '{';
+    mount_str(s_out + 1, sizeof(s_out) - 3);
+    strcat(s_out, "}");
+    return send_text(l, s_out);
   }
   // DRIFT BONUS <0|1> [<próg pełnego gazu %> [<czas s>]] – bonus za pełny gaz (v6; próg i czas v7)
   if (!strcmp(c, "DRIFT") && argc >= 3 && !strcmp(argv[1], "BONUS")) {
